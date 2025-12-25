@@ -1,5 +1,5 @@
 use crate::models::{GameServer, Protocol, GameServerTestResult, GameServerError};
-use crate::packet_parser::{build_packets, parse_response, parse_script, execute_code_blocks, OutputBlock, OutputCommand, OutputStatus};
+use crate::packet_parser::{build_packets_with_vars, parse_response, parse_script, execute_code_blocks, OutputBlock, OutputCommand, OutputStatus, PacketResponsePair};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use indexmap::IndexMap;
@@ -37,43 +37,16 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
         }
     };
 
-    // Build all packets first (for length calculations)
-    println!("[CHECK] Step 2: Building {} packet/response pair(s)...", script.pairs.len());
-    let built_packets = match build_packets(&script) {
-        Ok(p) => {
-            let total_bytes: usize = p.iter().map(|packet| packet.len()).sum();
-            println!("[CHECK] Packets built successfully: {} packet(s), {} total bytes", p.len(), total_bytes);
-            p
-        },
-        Err(e) => {
-            println!("[CHECK] Packet building failed: {}", e);
-            return GameServerTestResult {
-                success: false,
-                response_time_ms: 0,
-                raw_response: None,
-                parsed_values: serde_json::json!({}),
-                variables: serde_json::json!({}),
-                error: Some(GameServerError {
-                    error_type: "SyntaxError".to_string(),
-                    message: e.to_string(),
-                    line: None,
-                }),
-                output_labels_success: Vec::new(),
-                output_labels_error: Vec::new(),
-            };
-        }
-    };
-
-    // Execute pairs sequentially: send packet, receive response, parse response
-    println!("[CHECK] Step 3: Executing {} pair(s) sequentially via {:?} to {}:{} (timeout: {}ms)...", 
+    // Execute pairs sequentially: build packets with current variables, send, receive response, parse response
+    println!("[CHECK] Step 2: Executing {} pair(s) sequentially via {:?} to {}:{} (timeout: {}ms)...", 
              script.pairs.len(), server.protocol, server.address, server.port, server.timeout_ms);
     
     let mut all_responses = Vec::new();
     let mut all_parsed_vars = IndexMap::new();
     let mut last_error: Option<GameServerError> = None;
 
-    // Create and maintain connection/socket for all pairs
-    let pair_results: Vec<Result<Vec<u8>, anyhow::Error>> = match server.protocol {
+    // Execute pairs sequentially: build, send, receive, parse immediately
+    match server.protocol {
         Protocol::Udp => {
             // Create UDP socket once and reuse for all pairs
             use tokio::net::UdpSocket;
@@ -100,20 +73,74 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
             };
             println!("[UDP] Socket created, will be reused for all {} pair(s)", script.pairs.len());
             
-            // Execute all pairs with the same socket
-            let mut results = Vec::new();
-            for (pair_idx, _pair) in script.pairs.iter().enumerate() {
+            // Execute all pairs with the same socket, parsing responses immediately
+            for (pair_idx, pair) in script.pairs.iter().enumerate() {
                 println!("[CHECK] Executing pair {} of {}...", pair_idx + 1, script.pairs.len());
-                let packet = &built_packets[pair_idx];
-                match send_packet_udp(&socket, &addr, packet, server.timeout_ms).await {
-                    Ok(response) => results.push(Ok(response)),
+                
+                // Build packets for this pair with current variables (just before sending)
+                println!("[BUILD] Building packets for pair {} with {} variable(s)...", pair_idx + 1, all_parsed_vars.len());
+                let pair_packets = match build_packets_for_pair(pair, &all_parsed_vars) {
+                    Ok(packets) => {
+                        println!("[BUILD] Built {} packet(s) for pair {}", packets.len(), pair_idx + 1);
+                        packets
+                    },
                     Err(e) => {
-                        results.push(Err(e));
+                        last_error = Some(GameServerError {
+                            error_type: "BuildError".to_string(),
+                            message: format!("Pair {}: {}", pair_idx + 1, e),
+                            line: None,
+                        });
                         break;
                     }
+                };
+                
+                // For UDP, send only the first packet (each pair has one packet)
+                if let Some(packet) = pair_packets.first() {
+                    match send_packet_udp(&socket, &addr, packet, server.timeout_ms).await {
+                        Ok(response) => {
+                            all_responses.push(response.clone());
+                            
+                            // Parse the response immediately so variables are available for next pair
+                            if !pair.response.is_empty() {
+                                println!("[CHECK] Parsing pair {} response with {} response commands...", pair_idx + 1, pair.response.len());
+                                match parse_response(&pair.response, &response) {
+                                    Ok((vars, _bytes_read)) => {
+                                        println!("[CHECK] Pair {} response parsing successful: {} variables extracted", 
+                                                 pair_idx + 1, vars.len());
+                                        // Merge variables into all_parsed_vars (later pairs can override earlier ones)
+                                        all_parsed_vars.extend(vars);
+                                    }
+                                    Err(e) => {
+                                        println!("[CHECK] Pair {} response parsing failed: {}", pair_idx + 1, e);
+                                        last_error = Some(GameServerError {
+                                            error_type: "ParseError".to_string(),
+                                            message: format!("Pair {}: {}", pair_idx + 1, e),
+                                            line: None,
+                                        });
+                                        break;
+                                    }
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            last_error = Some(GameServerError {
+                                error_type: "NetworkError".to_string(),
+                                message: format!("Pair {}: {}", pair_idx + 1, e),
+                                line: None,
+                            });
+                            break;
+                        }
+                    }
+                } else {
+                    last_error = Some(GameServerError {
+                        error_type: "BuildError".to_string(),
+                        message: format!("No packets to send for pair {}", pair_idx + 1),
+                        line: None,
+                    });
+                    break;
                 }
             }
-            results
+            // UDP parsing is done inline above
         },
         Protocol::Tcp => {
             // Create TCP connection and manage it per pair (may be closed/reopened)
@@ -124,10 +151,6 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
             let timeout_duration = Duration::from_millis(server.timeout_ms);
             
             let mut stream: Option<TcpStream> = None;
-            let mut results = Vec::new();
-            
-            // Track packet index across all pairs
-            let mut global_packet_idx = 0;
             
             for (pair_idx, pair) in script.pairs.iter().enumerate() {
                 println!("[CHECK] Executing pair {} of {} ({} packet(s))...", pair_idx + 1, script.pairs.len(), pair.packets.len());
@@ -149,34 +172,61 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                             println!("[TCP] Connected successfully");
                         },
                         Ok(Err(e)) => {
-                            results.push(Err(anyhow::anyhow!("Failed to connect to server: {}", e)));
+                            last_error = Some(GameServerError {
+                                error_type: "NetworkError".to_string(),
+                                message: format!("Failed to connect to server: {}", e),
+                                line: None,
+                            });
                             break;
                         },
                         Err(_) => {
-                            results.push(Err(anyhow::anyhow!("Connection timeout")));
+                            last_error = Some(GameServerError {
+                                error_type: "NetworkError".to_string(),
+                                message: "Connection timeout".to_string(),
+                                line: None,
+                            });
                             break;
                         }
                     }
                 }
                 
+                // Build packets for this pair with current variables (just before sending)
+                println!("[BUILD] Building packets for pair {} with {} variable(s)...", pair_idx + 1, all_parsed_vars.len());
+                let pair_packets = match build_packets_for_pair(pair, &all_parsed_vars) {
+                    Ok(packets) => {
+                        println!("[BUILD] Built {} packet(s) for pair {}", packets.len(), pair_idx + 1);
+                        packets
+                    },
+                    Err(e) => {
+                        last_error = Some(GameServerError {
+                            error_type: "BuildError".to_string(),
+                            message: format!("Pair {}: {}", pair_idx + 1, e),
+                            line: None,
+                        });
+                        break;
+                    }
+                };
+                
                 // Send all packets for this pair (without waiting for responses)
                 match stream.as_mut() {
                     Some(s) => {
-                        for (packet_in_pair_idx, _packet_commands) in pair.packets.iter().enumerate() {
-                            let packet = &built_packets[global_packet_idx];
-                            println!("[TCP] Sending packet {} of pair {} (packet {} total)...", 
-                                     packet_in_pair_idx + 1, pair_idx + 1, global_packet_idx + 1);
+                        for (packet_in_pair_idx, packet) in pair_packets.iter().enumerate() {
+                            println!("[TCP] Sending packet {} of pair {}...", 
+                                     packet_in_pair_idx + 1, pair_idx + 1);
                             match send_packet_tcp_no_response(s, packet).await {
                                 Ok(_) => {
-                                    println!("[TCP] Packet {} sent successfully", global_packet_idx + 1);
+                                    println!("[TCP] Packet {} of pair {} sent successfully", packet_in_pair_idx + 1, pair_idx + 1);
                                 },
                                 Err(e) => {
-                                    results.push(Err(anyhow::anyhow!("Failed to send packet {}: {}", global_packet_idx + 1, e)));
+                                    last_error = Some(GameServerError {
+                                        error_type: "NetworkError".to_string(),
+                                        message: format!("Failed to send packet {} of pair {}: {}", packet_in_pair_idx + 1, pair_idx + 1, e),
+                                        line: None,
+                                    });
                                     stream = None; // Connection is likely broken
                                     break;
                                 }
                             }
-                            global_packet_idx += 1;
                         }
                         
                         // After all packets are sent, wait for response (only if there's a response defined)
@@ -186,22 +236,47 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                                 match receive_packet_tcp(s, timeout_duration).await {
                                     Ok(response) => {
                                         println!("[TCP] Response received: {} bytes", response.len());
-                                        results.push(Ok(response));
+                                        all_responses.push(response.clone());
+                                        
+                                        // Parse the response immediately so variables are available for next pair
+                                        println!("[CHECK] Parsing pair {} response with {} response commands...", pair_idx + 1, pair.response.len());
+                                        match parse_response(&pair.response, &response) {
+                                            Ok((vars, _bytes_read)) => {
+                                                println!("[CHECK] Pair {} response parsing successful: {} variables extracted", 
+                                                         pair_idx + 1, vars.len());
+                                                // Merge variables into all_parsed_vars (later pairs can override earlier ones)
+                                                all_parsed_vars.extend(vars);
+                                            }
+                                            Err(e) => {
+                                                println!("[CHECK] Pair {} response parsing failed: {}", pair_idx + 1, e);
+                                                last_error = Some(GameServerError {
+                                                    error_type: "ParseError".to_string(),
+                                                    message: format!("Pair {}: {}", pair_idx + 1, e),
+                                                    line: None,
+                                                });
+                                                break;
+                                            }
+                                        }
                                     },
                                     Err(e) => {
-                                        results.push(Err(e));
+                                        last_error = Some(GameServerError {
+                                            error_type: "NetworkError".to_string(),
+                                            message: format!("Pair {}: {}", pair_idx + 1, e),
+                                            line: None,
+                                        });
                                         stream = None; // Connection is likely broken
                                         break;
                                     }
                                 }
                             }
-                        } else {
-                            // No response expected, push empty result
-                            results.push(Ok(Vec::new()));
                         }
                     },
                     None => {
-                        results.push(Err(anyhow::anyhow!("No connection available")));
+                        last_error = Some(GameServerError {
+                            error_type: "NetworkError".to_string(),
+                            message: "No connection available".to_string(),
+                            line: None,
+                        });
                         break;
                     }
                 }
@@ -211,51 +286,9 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
             if stream.is_some() {
                 println!("[TCP] All pairs complete, closing connection");
             }
-            results
-        },
-    };
-
-    for (pair_idx, pair_result) in pair_results.iter().enumerate() {
-        let pair = &script.pairs[pair_idx];
-        
-        let response = match pair_result {
-            Ok(r) => {
-                println!("[CHECK] Pair {} response received: {} bytes", pair_idx + 1, r.len());
-                r.clone()
-            },
-            Err(e) => {
-                println!("[CHECK] Pair {} network error: {}", pair_idx + 1, e);
-                last_error = Some(GameServerError {
-                    error_type: "NetworkError".to_string(),
-                    message: format!("Pair {}: {}", pair_idx + 1, e),
-                    line: None,
-                });
-                break;
-            }
-        };
-
-        all_responses.push(response.clone());
-        
-        // Parse the response with this pair's response commands
-        println!("[CHECK] Parsing pair {} response with {} response commands...", pair_idx + 1, pair.response.len());
-        match parse_response(&pair.response, &response) {
-            Ok((vars, _bytes_read)) => {
-                println!("[CHECK] Pair {} response parsing successful: {} variables extracted", 
-                         pair_idx + 1, vars.len());
-                // Merge variables into all_parsed_vars (later pairs can override earlier ones)
-                all_parsed_vars.extend(vars);
-            }
-            Err(e) => {
-                println!("[CHECK] Pair {} response parsing failed: {}", pair_idx + 1, e);
-                last_error = Some(GameServerError {
-                    error_type: "ParseError".to_string(),
-                    message: format!("Pair {}: {}", pair_idx + 1, e),
-                    line: None,
-                });
-                break;
-            }
+            // TCP parsing is done inline above
         }
-    }
+    };
 
     let response_time_ms = start.elapsed().as_millis() as u64;
     let raw_response_hex = if all_responses.len() == 1 {
@@ -840,5 +873,17 @@ fn replace_placeholders(code: &str, server: &GameServer) -> String {
     replaced = replaced.replace("IP", &host);
     replaced = replaced.replace("HOST", &host);
     replaced
+}
+
+/// Build packets for a single pair using the provided variables
+fn build_packets_for_pair(pair: &PacketResponsePair, vars: &IndexMap<String, Value>) -> Result<Vec<Vec<u8>>> {
+    // Create a temporary script with just this pair
+    use crate::packet_parser::PacketScript;
+    let temp_script = PacketScript {
+        pairs: vec![pair.clone()],
+        output_blocks: Vec::new(),
+        code_blocks: Vec::new(),
+    };
+    build_packets_with_vars(&temp_script, vars)
 }
 

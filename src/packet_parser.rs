@@ -7,7 +7,12 @@ pub enum PacketCommand {
     WriteByte(u8),
     WriteShort(u16, bool), // value, big_endian
     WriteInt(u32, bool),   // value, big_endian
+    WriteIntVar(String, bool), // variable name, big_endian - resolved at build time
+    WriteShortVar(String, bool), // variable name, big_endian - resolved at build time
+    WriteByteVar(String), // variable name - resolved at build time
+    WriteVarIntVar(String), // variable name - resolved at build time
     WriteString(String, Option<usize>), // value, optional fixed length
+    WriteStringVar(String, Option<usize>), // variable name, optional fixed length - resolved at build time
     WriteBytes(Vec<u8>),
     WriteVarInt(u64),
     WriteVarIntLen,
@@ -360,22 +365,42 @@ fn parse_packet_command(line: &str, line_num: usize) -> Result<PacketCommand> {
 
     match parts[0] {
         "WRITE_BYTE" => {
-            let value = parse_byte_value(parts.get(1).copied())?;
-            Ok(PacketCommand::WriteByte(value))
+            let token = parts.get(1)
+                .ok_or_else(|| anyhow::anyhow!("WRITE_BYTE requires value at line {}", line_num))?;
+            if is_variable_name(token) {
+                Ok(PacketCommand::WriteByteVar(token.to_string()))
+            } else {
+                let value = parse_byte_value(Some(token))?;
+                Ok(PacketCommand::WriteByte(value))
+            }
         }
         "WRITE_SHORT" => {
-            let value = parse_short_value(parts.get(1).copied())?;
-            Ok(PacketCommand::WriteShort(value, false))
+            let token = parts.get(1)
+                .ok_or_else(|| anyhow::anyhow!("WRITE_SHORT requires value at line {}", line_num))?;
+            if is_variable_name(token) {
+                Ok(PacketCommand::WriteShortVar(token.to_string(), false))
+            } else {
+                let value = parse_short_value(Some(token))?;
+                Ok(PacketCommand::WriteShort(value, false))
+            }
         }
         "WRITE_SHORT_BE" => {
-            let value = parse_short_value(parts.get(1).copied())?;
-            Ok(PacketCommand::WriteShort(value, true))
+            let token = parts.get(1)
+                .ok_or_else(|| anyhow::anyhow!("WRITE_SHORT_BE requires value at line {}", line_num))?;
+            if is_variable_name(token) {
+                Ok(PacketCommand::WriteShortVar(token.to_string(), true))
+            } else {
+                let value = parse_short_value(Some(token))?;
+                Ok(PacketCommand::WriteShort(value, true))
+            }
         }
         "WRITE_INT" => {
             let token = parts.get(1)
                 .ok_or_else(|| anyhow::anyhow!("WRITE_INT requires value at line {}", line_num))?;
             if token.eq_ignore_ascii_case("PACKET_LEN") {
                 Ok(PacketCommand::WriteIntLen(false)) // little-endian by default
+            } else if is_variable_name(token) {
+                Ok(PacketCommand::WriteIntVar(token.to_string(), false))
             } else {
                 let value = parse_int_value(Some(token))?;
                 Ok(PacketCommand::WriteInt(value, false))
@@ -386,6 +411,8 @@ fn parse_packet_command(line: &str, line_num: usize) -> Result<PacketCommand> {
                 .ok_or_else(|| anyhow::anyhow!("WRITE_INT_BE requires value at line {}", line_num))?;
             if token.eq_ignore_ascii_case("PACKET_LEN") {
                 Ok(PacketCommand::WriteIntLen(true)) // big-endian
+            } else if is_variable_name(token) {
+                Ok(PacketCommand::WriteIntVar(token.to_string(), true))
             } else {
                 let value = parse_int_value(Some(token))?;
                 Ok(PacketCommand::WriteInt(value, true))
@@ -405,9 +432,14 @@ fn parse_packet_command(line: &str, line_num: usize) -> Result<PacketCommand> {
                         Ok(PacketCommand::WriteString(text, None))
                     }
                 } else {
-                    // No quotes, use old parsing
-                    let text = parse_string_value(parts.get(1).copied())?;
-                    Ok(PacketCommand::WriteString(text, None))
+                    // No quotes, check if it's a variable name
+                    let token = rest.trim();
+                    if is_variable_name(token) {
+                        Ok(PacketCommand::WriteStringVar(token.to_string(), None))
+                    } else {
+                        let text = parse_string_value(Some(token))?;
+                        Ok(PacketCommand::WriteString(text, None))
+                    }
                 }
             } else {
                 anyhow::bail!("WRITE_STRING requires text at line {}", line_num);
@@ -450,6 +482,8 @@ fn parse_packet_command(line: &str, line_num: usize) -> Result<PacketCommand> {
                 .ok_or_else(|| anyhow::anyhow!("WRITE_VARINT requires value at line {}", line_num))?;
             if token.eq_ignore_ascii_case("PACKET_LEN") {
                 Ok(PacketCommand::WriteVarIntLen)
+            } else if is_variable_name(token) {
+                Ok(PacketCommand::WriteVarIntVar(token.to_string()))
             } else {
                 let value = parse_literal_value(token)
                     .with_context(|| format!("Invalid varint value at line {}", line_num))?;
@@ -738,6 +772,21 @@ fn parse_literal_value(token: &str) -> Result<u64> {
             .parse::<u64>()
             .with_context(|| format!("Invalid numeric value: {}", token))
     }
+}
+
+/// Check if a token looks like a variable name (not a literal value)
+/// Variable names start with a letter or underscore and contain only alphanumeric/underscore
+fn is_variable_name(token: &str) -> bool {
+    if token.is_empty() {
+        return false;
+    }
+    // Must start with letter or underscore
+    let first_char = token.chars().next().unwrap();
+    if !first_char.is_alphabetic() && first_char != '_' {
+        return false;
+    }
+    // All characters must be alphanumeric or underscore
+    token.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
 fn parse_code_command(line: &str, line_num: usize) -> Result<CodeCommand> {
@@ -1209,7 +1258,95 @@ fn parse_condition(cond_str: &str, line_num: usize) -> Result<Condition> {
     anyhow::bail!("Invalid condition: {} at line {}", cond_str, line_num);
 }
 
+/// Helper function to resolve a variable value from the variables map
+fn resolve_var_value(vars: &IndexMap<String, JsonValue>, var_name: &str) -> Result<JsonValue> {
+    vars.get(var_name)
+        .ok_or_else(|| anyhow::anyhow!("Variable '{}' not found in variables map", var_name))
+        .cloned()
+}
+
+/// Helper function to get a numeric value (u32) from a JSON value
+fn get_u32_from_json(value: &JsonValue) -> Result<u32> {
+    if let Some(n) = value.as_u64() {
+        Ok(n as u32)
+    } else if let Some(n) = value.as_i64() {
+        Ok(n as u32)
+    } else if let Some(s) = value.as_str() {
+        // Try parsing as hex or decimal
+        if s.starts_with("0x") || s.starts_with("0X") {
+            u32::from_str_radix(&s[2..], 16)
+                .with_context(|| format!("Invalid hex string: {}", s))
+        } else {
+            s.parse::<u32>()
+                .with_context(|| format!("Invalid number string: {}", s))
+        }
+    } else {
+        anyhow::bail!("Cannot convert value to u32: {:?}", value)
+    }
+}
+
+/// Helper function to get a numeric value (u16) from a JSON value
+fn get_u16_from_json(value: &JsonValue) -> Result<u16> {
+    if let Some(n) = value.as_u64() {
+        Ok(n as u16)
+    } else if let Some(n) = value.as_i64() {
+        Ok(n as u16)
+    } else if let Some(s) = value.as_str() {
+        if s.starts_with("0x") || s.starts_with("0X") {
+            u16::from_str_radix(&s[2..], 16)
+                .with_context(|| format!("Invalid hex string: {}", s))
+        } else {
+            s.parse::<u16>()
+                .with_context(|| format!("Invalid number string: {}", s))
+        }
+    } else {
+        anyhow::bail!("Cannot convert value to u16: {:?}", value)
+    }
+}
+
+/// Helper function to get a numeric value (u8) from a JSON value
+fn get_u8_from_json(value: &JsonValue) -> Result<u8> {
+    if let Some(n) = value.as_u64() {
+        Ok(n as u8)
+    } else if let Some(n) = value.as_i64() {
+        Ok(n as u8)
+    } else if let Some(s) = value.as_str() {
+        if s.starts_with("0x") || s.starts_with("0X") {
+            u8::from_str_radix(&s[2..], 16)
+                .with_context(|| format!("Invalid hex string: {}", s))
+        } else {
+            s.parse::<u8>()
+                .with_context(|| format!("Invalid number string: {}", s))
+        }
+    } else {
+        anyhow::bail!("Cannot convert value to u8: {:?}", value)
+    }
+}
+
+/// Helper function to get a numeric value (u64) from a JSON value
+fn get_u64_from_json(value: &JsonValue) -> Result<u64> {
+    if let Some(n) = value.as_u64() {
+        Ok(n)
+    } else if let Some(n) = value.as_i64() {
+        Ok(n as u64)
+    } else if let Some(s) = value.as_str() {
+        if s.starts_with("0x") || s.starts_with("0X") {
+            u64::from_str_radix(&s[2..], 16)
+                .with_context(|| format!("Invalid hex string: {}", s))
+        } else {
+            s.parse::<u64>()
+                .with_context(|| format!("Invalid number string: {}", s))
+        }
+    } else {
+        anyhow::bail!("Cannot convert value to u64: {:?}", value)
+    }
+}
+
 pub fn build_packets(script: &PacketScript) -> Result<Vec<Vec<u8>>> {
+    build_packets_with_vars(script, &IndexMap::new())
+}
+
+pub fn build_packets_with_vars(script: &PacketScript, vars: &IndexMap<String, JsonValue>) -> Result<Vec<Vec<u8>>> {
     println!("[BUILD] Starting packet construction with {} pair(s)", script.pairs.len());
     let mut built_packets = Vec::new();
 
@@ -1229,6 +1366,12 @@ pub fn build_packets(script: &PacketScript) -> Result<Vec<Vec<u8>>> {
                     println!("[BUILD] Packet {} Command {}: WRITE_BYTE 0x{:02X} ({})", packet_idx + 1, idx + 1, v, v);
                     packet.push(*v);
                 }
+                PacketCommand::WriteByteVar(var_name) => {
+                    let value = get_u8_from_json(&resolve_var_value(vars, var_name)?)?;
+                    println!("[BUILD] Packet {} Command {}: WRITE_BYTE {} (var: {}) = 0x{:02X} ({})", 
+                             packet_idx + 1, idx + 1, var_name, var_name, value, value);
+                    packet.push(value);
+                }
                 PacketCommand::WriteShort(v, big_endian) => {
                     let bytes = if *big_endian {
                         v.to_be_bytes()
@@ -1239,6 +1382,17 @@ pub fn build_packets(script: &PacketScript) -> Result<Vec<Vec<u8>>> {
                              packet_idx + 1, idx + 1, if *big_endian { "_BE" } else { "" }, v, bytes[0], bytes[1]);
                     packet.extend_from_slice(&bytes);
                 }
+                PacketCommand::WriteShortVar(var_name, big_endian) => {
+                    let value = get_u16_from_json(&resolve_var_value(vars, var_name)?)?;
+                    let bytes = if *big_endian {
+                        value.to_be_bytes()
+                    } else {
+                        value.to_le_bytes()
+                    };
+                    println!("[BUILD] Packet {} Command {}: WRITE_SHORT{} {} (var: {}) = {} (bytes: {:02X} {:02X})", 
+                             packet_idx + 1, idx + 1, if *big_endian { "_BE" } else { "" }, var_name, var_name, value, bytes[0], bytes[1]);
+                    packet.extend_from_slice(&bytes);
+                }
                 PacketCommand::WriteInt(v, big_endian) => {
                     let bytes = if *big_endian {
                         v.to_be_bytes()
@@ -1247,6 +1401,18 @@ pub fn build_packets(script: &PacketScript) -> Result<Vec<Vec<u8>>> {
                     };
                     println!("[BUILD] Packet {} Command {}: WRITE_INT{} {} (bytes: {:02X} {:02X} {:02X} {:02X})", 
                              packet_idx + 1, idx + 1, if *big_endian { "_BE" } else { "" }, v, 
+                             bytes[0], bytes[1], bytes[2], bytes[3]);
+                    packet.extend_from_slice(&bytes);
+                }
+                PacketCommand::WriteIntVar(var_name, big_endian) => {
+                    let value = get_u32_from_json(&resolve_var_value(vars, var_name)?)?;
+                    let bytes = if *big_endian {
+                        value.to_be_bytes()
+                    } else {
+                        value.to_le_bytes()
+                    };
+                    println!("[BUILD] Packet {} Command {}: WRITE_INT{} {} (var: {}) = {} (bytes: {:02X} {:02X} {:02X} {:02X})", 
+                             packet_idx + 1, idx + 1, if *big_endian { "_BE" } else { "" }, var_name, var_name, value,
                              bytes[0], bytes[1], bytes[2], bytes[3]);
                     packet.extend_from_slice(&bytes);
                 }
@@ -1264,6 +1430,23 @@ pub fn build_packets(script: &PacketScript) -> Result<Vec<Vec<u8>>> {
                         packet.push(0); // Null terminator
                     }
                 }
+                PacketCommand::WriteStringVar(var_name, length_opt) => {
+                    let value = resolve_var_value(vars, var_name)?;
+                    let text = value.as_str()
+                        .ok_or_else(|| anyhow::anyhow!("Variable '{}' is not a string", var_name))?;
+                    if let Some(length) = length_opt {
+                        let mut bytes = text.as_bytes().to_vec();
+                        bytes.resize(*length, 0);
+                        println!("[BUILD] Packet {} Command {}: WRITE_STRING_LEN {} (var: {}) = \"{}\" {} ({} bytes, padded)", 
+                                 packet_idx + 1, idx + 1, var_name, var_name, text, length, length);
+                        packet.extend_from_slice(&bytes[..*length]);
+                    } else {
+                        println!("[BUILD] Packet {} Command {}: WRITE_STRING {} (var: {}) = \"{}\" ({} bytes + null terminator)", 
+                                 packet_idx + 1, idx + 1, var_name, var_name, text, text.len());
+                        packet.extend_from_slice(text.as_bytes());
+                        packet.push(0); // Null terminator
+                    }
+                }
                 PacketCommand::WriteBytes(bytes) => {
                     println!("[BUILD] Packet {} Command {}: WRITE_BYTES {} bytes (hex: {})", 
                              packet_idx + 1, idx + 1, bytes.len(), hex::encode(bytes));
@@ -1273,6 +1456,13 @@ pub fn build_packets(script: &PacketScript) -> Result<Vec<Vec<u8>>> {
                     let encoded = encode_varint(*value);
                     println!("[BUILD] Packet {} Command {}: WRITE_VARINT {} (bytes: {})",
                              packet_idx + 1, idx + 1, value, hex::encode(&encoded));
+                    packet.extend_from_slice(&encoded);
+                }
+                PacketCommand::WriteVarIntVar(var_name) => {
+                    let value = get_u64_from_json(&resolve_var_value(vars, var_name)?)?;
+                    let encoded = encode_varint(value);
+                    println!("[BUILD] Packet {} Command {}: WRITE_VARINT {} (var: {}) = {} (bytes: {})",
+                             packet_idx + 1, idx + 1, var_name, var_name, value, hex::encode(&encoded));
                     packet.extend_from_slice(&encoded);
                 }
                 PacketCommand::WriteVarIntLen => {
