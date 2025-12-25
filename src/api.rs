@@ -275,10 +275,11 @@ pub async fn create_game_server(
     let pseudo_code = create_game_server.pseudo_code.clone();
 
     let result = state.store.write(|db| {
+        // Check for duplicate name (case-insensitive)
         if db.game_servers.iter().any(|server| {
-            server.address == address && server.port == port && server.protocol == protocol
+            server.name.trim().eq_ignore_ascii_case(name.trim())
         }) {
-            return Err(anyhow::anyhow!("Game server with the same address/protocol already exists"));
+            return Err(anyhow::anyhow!("Game server with the same name already exists"));
         }
 
         let id = db.get_next_id();

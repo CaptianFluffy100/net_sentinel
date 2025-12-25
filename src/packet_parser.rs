@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
-use std::collections::HashMap;
+use indexmap::IndexMap;
+use serde_json::Value as JsonValue;
 
 #[derive(Debug, Clone)]
 pub enum PacketCommand {
@@ -45,60 +46,182 @@ pub struct OutputBlock {
 }
 
 #[derive(Debug, Clone)]
+pub enum VariableType {
+    String,
+    Int,
+    Byte,
+    Float,
+    Array,
+}
+
+#[derive(Debug, Clone)]
+pub enum CodeCommand {
+    // Variable declarations
+    DeclareVar {
+        var_type: VariableType,
+        name: String,
+        value: Expression,
+    },
+    // Assign to existing variable
+    AssignVar {
+        name: String,
+        value: Expression,
+    },
+    // Control flow
+    ForLoop {
+        var_name: String,
+        range_start: Expression,
+        range_end: Expression,
+        body: Vec<CodeCommand>,
+    },
+    ForInArray {
+        var_name: String,
+        array_name: String,
+        body: Vec<CodeCommand>,
+    },
+    IfStatement {
+        condition: Condition,
+        body: Vec<CodeCommand>,
+        else_if: Vec<(Condition, Vec<CodeCommand>)>,
+        else_body: Option<Vec<CodeCommand>>,
+    },
+    // String functions
+    Split {
+        var_name: String,
+        source_expr: Expression,
+        delimiter: String,
+    },
+    Replace {
+        var_name: String,
+        source_expr: Expression,
+        search: String,
+        replace: String,
+    },
+    // Control flow
+    Break,
+    // Execute packet/response commands (nested)
+    ExecutePacketCommand(PacketCommand),
+    ExecuteResponseCommand(ResponseCommand),
+}
+
+#[derive(Debug, Clone)]
+pub enum Expression {
+    Literal(JsonValue),
+    Variable(String),
+    ArrayIndex {
+        array_name: String,
+        index: Box<Expression>,
+    },
+    FunctionCall {
+        name: String,
+        args: Vec<Expression>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum Condition {
+    Equals(Expression, Expression),
+    NotEquals(Expression, Expression),
+    GreaterThan(Expression, Expression),
+    LessThan(Expression, Expression),
+    GreaterOrEqual(Expression, Expression),
+    LessOrEqual(Expression, Expression),
+    Contains(Expression, Expression), // string contains substring
+}
+
+#[derive(Debug, Clone)]
+pub struct CodeBlock {
+    pub commands: Vec<CodeCommand>,
+}
+
+#[derive(Debug, Clone)]
 pub struct PacketResponsePair {
-    pub packet: Vec<PacketCommand>,
+    pub packets: Vec<Vec<PacketCommand>>, // Multiple packets to send before waiting for response
     pub response: Vec<ResponseCommand>,
+    pub close_connection_before: bool, // If true, close connection before this pair
 }
 
 #[derive(Debug)]
 pub struct PacketScript {
     pub pairs: Vec<PacketResponsePair>,
     pub output_blocks: Vec<OutputBlock>,
+    pub code_blocks: Vec<CodeBlock>,
 }
 
 pub fn parse_script(script: &str) -> Result<PacketScript> {
     println!("[PARSER] Starting script parsing...");
     let lines: Vec<&str> = script.lines().collect();
     let mut pairs = Vec::new();
-    let mut current_packet = Vec::new();
+    let mut current_packets = Vec::new(); // Accumulate multiple packets
+    let mut current_packet = Vec::new(); // Current packet being built
     let mut current_response = Vec::new();
     let mut output_blocks = Vec::new();
     let mut current_output: Option<OutputBlock> = None;
+    let mut code_blocks = Vec::new();
+    let mut current_code = Vec::new();
     let mut in_packet = false;
     let mut in_response = false;
+    let mut in_code = false;
+    let mut close_connection_before_next = false; // Track if CONNECTION_CLOSE was seen
 
-    for (line_num, line) in lines.iter().enumerate() {
-        let line = line.trim();
+    let mut line_num = 0;
+    let mut processed_lines = std::collections::HashSet::new();
+    
+    while line_num < lines.len() {
+        if processed_lines.contains(&line_num) {
+            line_num += 1;
+            continue;
+        }
+        
+        let line = lines[line_num].trim();
         
         // Skip empty lines and comments
         if line.is_empty() || line.starts_with('#') {
             if line.starts_with('#') {
                 println!("[PARSER] Line {}: Comment skipped: {}", line_num + 1, line);
             }
+            line_num += 1;
+            continue;
+        }
+
+        // Connection close command
+        if line == "CONNECTION_CLOSE" {
+            println!("[PARSER] Line {}: CONNECTION_CLOSE command", line_num + 1);
+            close_connection_before_next = true;
+            line_num += 1;
             continue;
         }
 
         // Packet section
         if line == "PACKET_START" {
             println!("[PARSER] Line {}: Entering PACKET_START section", line_num + 1);
-            // If we were already in a packet, save the pair before starting a new one
+            // If we were already in a packet, save the current packet to the packets list
             if in_packet && !current_packet.is_empty() {
-                println!("[PARSER] Saving previous packet/response pair (packet: {} commands, response: {} commands)", 
-                         current_packet.len(), current_response.len());
-                pairs.push(PacketResponsePair {
-                    packet: current_packet.clone(),
-                    response: current_response.clone(),
-                });
+                println!("[PARSER] Saving packet with {} commands to packets list", current_packet.len());
+                current_packets.push(current_packet.clone());
                 current_packet.clear();
-                current_response.clear();
+            }
+            // Mark this new pair to close connection before it if CONNECTION_CLOSE was seen
+            let should_close = close_connection_before_next;
+            close_connection_before_next = false; // Reset flag
+            if should_close {
+                println!("[PARSER] This PACKET_START will close connection before sending");
             }
             in_packet = true;
             in_response = false;
+            line_num += 1;
             continue;
         }
         if line == "PACKET_END" {
             println!("[PARSER] Line {}: Exiting PACKET section (found {} commands)", line_num + 1, current_packet.len());
+            if !current_packet.is_empty() {
+                // Save this packet to the packets list
+                current_packets.push(current_packet.clone());
+                current_packet.clear();
+                println!("[PARSER] Packet saved, total packets in current group: {}", current_packets.len());
+            }
             in_packet = false;
+            line_num += 1;
             continue;
         }
         
@@ -107,43 +230,106 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
             println!("[PARSER] Line {}: Entering RESPONSE_START section", line_num + 1);
             in_response = true;
             in_packet = false;
+            in_code = false;
+            line_num += 1;
             continue;
         }
         if line == "RESPONSE_END" {
             println!("[PARSER] Line {}: Exiting RESPONSE section (found {} commands)", line_num + 1, current_response.len());
-            // When response ends, save the packet/response pair
-            if !current_packet.is_empty() {
-                println!("[PARSER] Saving packet/response pair (packet: {} commands, response: {} commands)", 
-                         current_packet.len(), current_response.len());
+            // When response ends, save all accumulated packets with the response
+            if !current_packets.is_empty() {
+                println!("[PARSER] Saving packet/response pair ({} packet(s), response: {} commands)", 
+                         current_packets.len(), current_response.len());
+                // Check if this pair should close connection before it
+                let should_close = close_connection_before_next;
+                close_connection_before_next = false; // Reset flag
+                if should_close {
+                    println!("[PARSER] This pair will close connection before sending");
+                }
                 pairs.push(PacketResponsePair {
-                    packet: current_packet.clone(),
+                    packets: current_packets.clone(),
                     response: current_response.clone(),
+                    close_connection_before: should_close,
                 });
-                current_packet.clear();
+                current_packets.clear();
                 current_response.clear();
             }
             in_response = false;
+            line_num += 1;
+            continue;
+        }
+
+        // Code section
+        if line == "CODE_START" {
+            println!("[PARSER] Line {}: Entering CODE_START section", line_num + 1);
+            // If we have accumulated packets but no response yet, we need to save them first
+            // This can happen if CODE_START appears after PACKET_END but before RESPONSE_START
+            if !current_packets.is_empty() && current_response.is_empty() {
+                println!("[PARSER] WARNING: CODE_START encountered with {} accumulated packet(s) but no response. Packets will be lost!", current_packets.len());
+                current_packets.clear();
+            }
+            in_code = true;
+            in_packet = false;
+            in_response = false;
+            current_code.clear();
+            line_num += 1;
+            continue;
+        }
+        if line == "CODE_END" {
+            println!("[PARSER] Line {}: Exiting CODE section (found {} commands)", line_num + 1, current_code.len());
+            if !current_code.is_empty() {
+                code_blocks.push(CodeBlock {
+                    commands: current_code.clone(),
+                });
+                current_code.clear();
+            }
+            in_code = false;
+            line_num += 1;
             continue;
         }
 
         if in_packet {
             println!("[PARSER] Line {}: Parsing packet command: {}", line_num + 1, line);
             current_packet.push(parse_packet_command(line, line_num + 1)?);
+            line_num += 1;
         } else if in_response {
             println!("[PARSER] Line {}: Parsing response command: {}", line_num + 1, line);
             current_response.push(parse_response_command(line, line_num + 1)?);
+            line_num += 1;
+        } else if in_code {
+            println!("[PARSER] Line {}: Parsing code command: {}", line_num + 1, line);
+            let indent_level = lines[line_num].len() - lines[line_num].trim_start().len();
+            
+            if line.ends_with(':') && (line.starts_with("FOR ") || line.starts_with("IF ")) {
+                // Parse multi-line control flow statement
+                let (cmd, lines_consumed) = parse_control_flow(&lines, line_num, indent_level)?;
+                current_code.push(cmd);
+                // Mark all consumed lines as processed
+                for i in 0..lines_consumed {
+                    processed_lines.insert(line_num + i);
+                }
+                line_num += lines_consumed;
+            } else if indent_level > 0 {
+                // This is an indented line, skip it (it's part of a control flow body we already parsed)
+                line_num += 1;
+            } else {
+                current_code.push(parse_code_command(line, line_num + 1)?);
+                line_num += 1;
+            }
         } else {
             handle_output_line(line, line_num + 1, &mut current_output, &mut output_blocks)?;
+            line_num += 1;
         }
     }
 
     // Save any remaining packet/response pair
-    if !current_packet.is_empty() {
-        println!("[PARSER] Saving final packet/response pair (packet: {} commands, response: {} commands)", 
-                 current_packet.len(), current_response.len());
+    if !current_packets.is_empty() {
+        println!("[PARSER] Saving final packet/response pair ({} packet(s), response: {} commands)", 
+                 current_packets.len(), current_response.len());
         pairs.push(PacketResponsePair {
-            packet: current_packet,
+            packets: current_packets,
             response: current_response,
+            close_connection_before: close_connection_before_next,
         });
     }
 
@@ -151,10 +337,18 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
         output_blocks.push(block);
     }
 
-    println!("[PARSER] Script parsing complete: {} packet/response pair(s)", pairs.len());
+    // Save any remaining code block
+    if !current_code.is_empty() {
+        code_blocks.push(CodeBlock {
+            commands: current_code,
+        });
+    }
+
+    println!("[PARSER] Script parsing complete: {} packet/response pair(s), {} code block(s)", pairs.len(), code_blocks.len());
     Ok(PacketScript {
         pairs,
         output_blocks,
+        code_blocks,
     })
 }
 
@@ -412,11 +606,87 @@ fn parse_output_command(line: &str, line_num: usize) -> Result<OutputCommand> {
 
 fn strip_quotes(input: &str) -> String {
     let trimmed = input.trim();
-    if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
-        trimmed[1..trimmed.len() - 1].to_string()
+    if trimmed.len() >= 2 {
+        if trimmed.starts_with('"') && trimmed.ends_with('"') {
+            trimmed[1..trimmed.len() - 1].to_string()
+        } else if trimmed.starts_with('\'') && trimmed.ends_with('\'') {
+            trimmed[1..trimmed.len() - 1].to_string()
+        } else {
+            trimmed.to_string()
+        }
     } else {
         trimmed.to_string()
     }
+}
+
+fn parse_function_args(args_str: &str) -> Result<Vec<String>> {
+    let mut args = Vec::new();
+    let mut current_arg = String::new();
+    let mut in_quotes = false;
+    let mut quote_char = '\0';
+    let mut chars = args_str.chars().peekable();
+    
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' | '\'' => {
+                if !in_quotes {
+                    in_quotes = true;
+                    quote_char = ch;
+                    current_arg.push(ch);
+                } else if ch == quote_char {
+                    in_quotes = false;
+                    quote_char = '\0';
+                    current_arg.push(ch);
+                } else {
+                    current_arg.push(ch);
+                }
+            }
+            ',' => {
+                if in_quotes {
+                    current_arg.push(ch);
+                } else {
+                    args.push(current_arg.trim().to_string());
+                    current_arg.clear();
+                }
+            }
+            _ => {
+                current_arg.push(ch);
+            }
+        }
+    }
+    
+    if !current_arg.is_empty() {
+        args.push(current_arg.trim().to_string());
+    }
+    
+    Ok(args)
+}
+
+fn find_comment_position(text: &str) -> Option<usize> {
+    let mut in_quotes = false;
+    let mut quote_char = '\0';
+    let mut chars = text.char_indices();
+    
+    while let Some((pos, ch)) = chars.next() {
+        match ch {
+            '"' | '\'' => {
+                if !in_quotes {
+                    in_quotes = true;
+                    quote_char = ch;
+                } else if ch == quote_char {
+                    in_quotes = false;
+                    quote_char = '\0';
+                }
+            }
+            '#' => {
+                if !in_quotes {
+                    return Some(pos);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn parse_byte_value(s: Option<&str>) -> Result<u8> {
@@ -470,16 +740,487 @@ fn parse_literal_value(token: &str) -> Result<u64> {
     }
 }
 
+fn parse_code_command(line: &str, line_num: usize) -> Result<CodeCommand> {
+    let trimmed = line.trim();
+    
+    // Handle indented lines (for loops, if statements) - they're handled by the caller
+    // This function handles single-line commands
+    
+    // Check for control flow statements that end with ':'
+    if trimmed.ends_with(':') {
+        // This is a control flow statement start - will be handled by multi-line parser
+        anyhow::bail!("Control flow statements must be handled with proper indentation at line {}", line_num);
+    }
+    
+    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+    if parts.is_empty() {
+        anyhow::bail!("Empty code command at line {}", line_num);
+    }
+    
+    // Variable declarations: TYPE VAR_NAME = VALUE
+    // Also handle: TYPE VAR_NAME = SPLIT(...) or TYPE VAR_NAME = REPLACE(...)
+    if parts.len() >= 4 && parts[2] == "=" {
+        let var_type_str = parts[0].to_uppercase();
+        let var_name = parts[1].to_string();
+        let mut value_str = parts[3..].join(" ");
+        
+        // Strip inline comments (everything after # that's not in quotes)
+        if let Some(comment_pos) = find_comment_position(&value_str) {
+            value_str = value_str[..comment_pos].trim().to_string();
+        }
+        
+        let var_type = match var_type_str.as_str() {
+            "STRING" => VariableType::String,
+            "INT" => VariableType::Int,
+            "BYTE" => VariableType::Byte,
+            "FLOAT" => VariableType::Float,
+            "ARRAY" => VariableType::Array,
+            _ => anyhow::bail!("Unknown variable type: {} at line {}", var_type_str, line_num),
+        };
+        
+        // Check if value_str is a SPLIT function call
+        if value_str.trim().starts_with("SPLIT(") && value_str.trim().ends_with(')') {
+            let func_call = value_str.trim().strip_prefix("SPLIT").unwrap_or("").trim();
+            if let Some(args) = func_call.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+                let args_parts = parse_function_args(args)?;
+                if args_parts.len() != 2 {
+                    anyhow::bail!("SPLIT requires 2 arguments: SPLIT(source_var, 'delimiter') at line {}", line_num);
+                }
+                let source_expr = parse_expression(&args_parts[0], line_num)?;
+                let delimiter = strip_quotes(&args_parts[1]);
+                return Ok(CodeCommand::Split {
+                    var_name,
+                    source_expr,
+                    delimiter,
+                });
+            }
+        }
+        
+        // Check if value_str is a REPLACE function call
+        if value_str.trim().starts_with("REPLACE(") && value_str.trim().ends_with(')') {
+            let func_call = value_str.trim().strip_prefix("REPLACE").unwrap_or("").trim();
+            if let Some(args) = func_call.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+                let args_parts = parse_function_args(args)?;
+                if args_parts.len() != 3 {
+                    anyhow::bail!("REPLACE requires 3 arguments: REPLACE(source_var, 'search', 'replace') at line {}", line_num);
+                }
+                let source_expr = parse_expression(&args_parts[0], line_num)?;
+                let search = strip_quotes(&args_parts[1]);
+                let replace = strip_quotes(&args_parts[2]);
+                return Ok(CodeCommand::Replace {
+                    var_name,
+                    source_expr,
+                    search,
+                    replace,
+                });
+            }
+        }
+        
+        // Regular expression evaluation
+        let value = parse_expression(&value_str, line_num)?;
+        return Ok(CodeCommand::DeclareVar {
+            var_type,
+            name: var_name,
+            value,
+        });
+    }
+    
+    // Variable assignment: VAR_NAME = VALUE
+    if parts.len() >= 3 && parts[1] == "=" {
+        let var_name = parts[0].to_string();
+        let mut value_str = parts[2..].join(" ");
+        
+        // Strip inline comments (everything after # that's not in quotes)
+        if let Some(comment_pos) = find_comment_position(&value_str) {
+            value_str = value_str[..comment_pos].trim().to_string();
+        }
+        
+        let value = parse_expression(&value_str, line_num)?;
+        return Ok(CodeCommand::AssignVar {
+            name: var_name,
+            value,
+        });
+    }
+    
+    // SPLIT function: SPLIT(VAR_NAME, 'DELIMITER')
+    if parts[0] == "SPLIT" {
+        // Parse: SPLIT(VAR_NAME, 'DELIMITER')
+        let func_call = trimmed.strip_prefix("SPLIT").unwrap_or("").trim();
+        if let Some(args) = func_call.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+            let args_parts = parse_function_args(args)?;
+            if args_parts.len() != 2 {
+                anyhow::bail!("SPLIT requires 2 arguments: SPLIT(var_name, 'delimiter') at line {}", line_num);
+            }
+            let source_expr = parse_expression(&args_parts[0], line_num)?;
+            let var_name = if let Expression::Variable(name) = &source_expr {
+                name.clone()
+            } else {
+                anyhow::bail!("SPLIT as standalone command requires variable name, not expression at line {}", line_num);
+            };
+            let delimiter = strip_quotes(&args_parts[1]);
+            return Ok(CodeCommand::Split {
+                var_name,
+                source_expr,
+                delimiter,
+            });
+        }
+        anyhow::bail!("Invalid SPLIT syntax at line {}", line_num);
+    }
+    
+    // REPLACE function: REPLACE(VAR_NAME, 'SEARCH', 'REPLACE')
+    if parts[0] == "REPLACE" {
+        let func_call = trimmed.strip_prefix("REPLACE").unwrap_or("").trim();
+        if let Some(args) = func_call.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+            let args_parts = parse_function_args(args)?;
+            if args_parts.len() != 3 {
+                anyhow::bail!("REPLACE requires 3 arguments: REPLACE(var_name, 'search', 'replace') at line {}", line_num);
+            }
+            let source_expr = parse_expression(&args_parts[0], line_num)?;
+            let var_name = if let Expression::Variable(name) = &source_expr {
+                name.clone()
+            } else {
+                anyhow::bail!("REPLACE as standalone command requires variable name, not expression at line {}", line_num);
+            };
+            let search = strip_quotes(&args_parts[1]);
+            let replace = strip_quotes(&args_parts[2]);
+            return Ok(CodeCommand::Replace {
+                var_name,
+                source_expr,
+                search,
+                replace,
+            });
+        }
+        anyhow::bail!("Invalid REPLACE syntax at line {}", line_num);
+    }
+    
+    // BREAK command
+    if parts[0] == "BREAK" {
+        return Ok(CodeCommand::Break);
+    }
+    
+    // Try to parse as packet/response command (for nested execution)
+    if let Ok(packet_cmd) = parse_packet_command(line, line_num) {
+        return Ok(CodeCommand::ExecutePacketCommand(packet_cmd));
+    }
+    if let Ok(response_cmd) = parse_response_command(line, line_num) {
+        return Ok(CodeCommand::ExecuteResponseCommand(response_cmd));
+    }
+    
+    anyhow::bail!("Unknown code command: {} at line {}", parts[0], line_num);
+}
+
+fn parse_control_flow(
+    lines: &[&str],
+    start_line: usize,
+    base_indent: usize,
+) -> Result<(CodeCommand, usize)> {
+    let line = lines[start_line].trim();
+    
+    if line.starts_with("FOR ") {
+        // FOR var_name IN array_name:
+        let rest = line.strip_prefix("FOR ").unwrap_or("").trim();
+        if let Some(in_pos) = rest.find(" IN ") {
+            let var_name = rest[..in_pos].trim().to_string();
+            let array_part = rest[in_pos + 4..].trim();
+            if array_part.ends_with(':') {
+                let array_name = array_part[..array_part.len() - 1].trim().to_string();
+                
+                // Parse the indented body
+                let body_indent = base_indent + 2; // Assume 2-space indentation
+                let (body, lines_consumed) = parse_indented_body(lines, start_line + 1, body_indent)?;
+                
+                return Ok((CodeCommand::ForInArray {
+                    var_name,
+                    array_name,
+                    body,
+                }, lines_consumed + 1));
+            }
+        }
+        anyhow::bail!("Invalid FOR syntax: FOR var_name IN array_name: at line {}", start_line + 1);
+    } else if line.starts_with("IF ") {
+        // IF condition:
+        let rest = line.strip_prefix("IF ").unwrap_or("").trim();
+        if rest.ends_with(':') {
+            let cond_str = rest[..rest.len() - 1].trim();
+            let condition = parse_condition(cond_str, start_line + 1)?;
+            
+            // Parse the indented body
+            let body_indent = base_indent + 2; // Assume 2-space indentation
+            let (body, lines_consumed) = parse_indented_body(lines, start_line + 1, body_indent)?;
+            
+            return Ok((CodeCommand::IfStatement {
+                condition,
+                body,
+                else_if: Vec::new(),
+                else_body: None,
+            }, lines_consumed + 1));
+        }
+        anyhow::bail!("Invalid IF syntax: IF condition: at line {}", start_line + 1);
+    }
+    
+    anyhow::bail!("Not a control flow statement at line {}", start_line + 1);
+}
+
+fn parse_indented_body(
+    lines: &[&str],
+    start_line: usize,
+    expected_indent: usize,
+) -> Result<(Vec<CodeCommand>, usize)> {
+    let mut body = Vec::new();
+    let mut line_idx = start_line;
+    
+    while line_idx < lines.len() {
+        let line = lines[line_idx];
+        let trimmed = line.trim();
+        
+        // Skip empty lines and comments
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            line_idx += 1;
+            continue;
+        }
+        
+        // Check indentation
+        let indent = line.len() - line.trim_start().len();
+        if indent < expected_indent {
+            // Less indented, end of body
+            break;
+        }
+        
+        // This line is part of the body
+        let line_content = line[expected_indent..].trim();
+        
+        // Check if it's a control flow statement
+        if line_content.ends_with(':') && (line_content.starts_with("FOR ") || line_content.starts_with("IF ")) {
+            let (cmd, consumed) = parse_control_flow(lines, line_idx, expected_indent)?;
+            body.push(cmd);
+            line_idx += consumed;
+        } else {
+            // Regular command
+            body.push(parse_code_command(line_content, line_idx + 1)?);
+            line_idx += 1;
+        }
+    }
+    
+    Ok((body, line_idx - start_line))
+}
+
+fn parse_expression(expr: &str, line_num: usize) -> Result<Expression> {
+    let expr = expr.trim();
+    
+    // Check if it's a quoted string
+    if expr.starts_with('"') && expr.ends_with('"') {
+        let value = strip_quotes(expr);
+        return Ok(Expression::Literal(JsonValue::String(value)));
+    }
+    
+    // Check if it's an array literal: [expr1, expr2, ...]
+    if expr.starts_with('[') && expr.ends_with(']') {
+        let inner = expr[1..expr.len() - 1].trim();
+        let elements: Vec<Expression> = if inner.is_empty() {
+            Vec::new()
+        } else {
+            // Parse comma-separated expressions, but handle nested arrays and function calls
+            let mut elements = Vec::new();
+            let mut current = String::new();
+            let mut depth = 0; // Track bracket/paren depth
+            let mut in_quotes = false;
+            let mut quote_char = '\0';
+            
+            for ch in inner.chars() {
+                match ch {
+                    '"' | '\'' => {
+                        if !in_quotes {
+                            in_quotes = true;
+                            quote_char = ch;
+                        } else if ch == quote_char {
+                            in_quotes = false;
+                            quote_char = '\0';
+                        }
+                        current.push(ch);
+                    }
+                    '[' | '(' => {
+                        if !in_quotes {
+                            depth += 1;
+                        }
+                        current.push(ch);
+                    }
+                    ']' | ')' => {
+                        if !in_quotes {
+                            depth -= 1;
+                        }
+                        current.push(ch);
+                    }
+                    ',' => {
+                        if !in_quotes && depth == 0 {
+                            // This comma is a separator
+                            if !current.trim().is_empty() {
+                                elements.push(parse_expression(current.trim(), line_num)?);
+                            }
+                            current.clear();
+                        } else {
+                            current.push(ch);
+                        }
+                    }
+                    _ => {
+                        current.push(ch);
+                    }
+                }
+            }
+            if !current.trim().is_empty() {
+                elements.push(parse_expression(current.trim(), line_num)?);
+            }
+            elements
+        };
+        return Ok(Expression::FunctionCall {
+            name: "__array_literal__".to_string(),
+            args: elements,
+        });
+    }
+    
+    // Check if it's a number
+    if let Ok(num) = expr.parse::<i64>() {
+        return Ok(Expression::Literal(JsonValue::Number(num.into())));
+    }
+    if let Ok(num) = expr.parse::<f64>() {
+        return Ok(Expression::Literal(JsonValue::Number(
+            serde_json::Number::from_f64(num).ok_or_else(|| anyhow::anyhow!("Invalid float at line {}", line_num))?
+        )));
+    }
+    
+    // Check if it's a hex number
+    if expr.starts_with("0x") || expr.starts_with("0X") {
+        if let Ok(num) = u64::from_str_radix(&expr[2..], 16) {
+            return Ok(Expression::Literal(JsonValue::Number(num.into())));
+        }
+    }
+    
+    // Check if it's an array index: var_name[index]
+    // This must come after array literal check to avoid conflicts
+    if let Some(bracket_pos) = expr.find('[') {
+        if expr.ends_with(']') && !expr.starts_with('[') {
+            let array_name = expr[..bracket_pos].trim();
+            let index_str = expr[bracket_pos + 1..expr.len() - 1].trim();
+            
+            // Validate array name (alphanumeric and underscores)
+            if array_name.chars().all(|c| c.is_alphanumeric() || c == '_') && !array_name.is_empty() {
+                let index_expr = parse_expression(index_str, line_num)?;
+                return Ok(Expression::ArrayIndex {
+                    array_name: array_name.to_string(),
+                    index: Box::new(index_expr),
+                });
+            }
+        }
+    }
+    
+    // Check if it's a variable reference
+    if expr.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return Ok(Expression::Variable(expr.to_string()));
+    }
+    
+    // Check if it's a function call
+    if let Some(func_name) = expr.split('(').next() {
+        if expr.contains('(') && expr.ends_with(')') {
+            let args_str = expr[func_name.len() + 1..expr.len() - 1].trim();
+            let args: Vec<Expression> = if args_str.is_empty() {
+                Vec::new()
+            } else {
+                args_str.split(',').map(|a| parse_expression(a.trim(), line_num)).collect::<Result<_>>()?
+            };
+            return Ok(Expression::FunctionCall {
+                name: func_name.trim().to_string(),
+                args,
+            });
+        }
+    }
+    
+    anyhow::bail!("Invalid expression: {} at line {}", expr, line_num);
+}
+
+fn parse_condition(cond_str: &str, line_num: usize) -> Result<Condition> {
+    let cond_str = cond_str.trim();
+    
+    // Parse CONTAINS operator (check before other operators to avoid conflicts)
+    if cond_str.contains(" CONTAINS ") {
+        let parts: Vec<&str> = cond_str.split(" CONTAINS ").map(|s| s.trim()).collect();
+        if parts.len() == 2 {
+            return Ok(Condition::Contains(
+                parse_expression(parts[0], line_num)?,
+                parse_expression(parts[1], line_num)?,
+            ));
+        }
+    }
+    
+    // Parse comparison operators: ==, !=, >, <, >=, <=
+    if cond_str.contains("==") {
+        let parts: Vec<&str> = cond_str.split("==").map(|s| s.trim()).collect();
+        if parts.len() == 2 {
+            return Ok(Condition::Equals(
+                parse_expression(parts[0], line_num)?,
+                parse_expression(parts[1], line_num)?,
+            ));
+        }
+    }
+    if cond_str.contains("!=") {
+        let parts: Vec<&str> = cond_str.split("!=").map(|s| s.trim()).collect();
+        if parts.len() == 2 {
+            return Ok(Condition::NotEquals(
+                parse_expression(parts[0], line_num)?,
+                parse_expression(parts[1], line_num)?,
+            ));
+        }
+    }
+    if cond_str.contains(">=") {
+        let parts: Vec<&str> = cond_str.split(">=").map(|s| s.trim()).collect();
+        if parts.len() == 2 {
+            return Ok(Condition::GreaterOrEqual(
+                parse_expression(parts[0], line_num)?,
+                parse_expression(parts[1], line_num)?,
+            ));
+        }
+    }
+    if cond_str.contains("<=") {
+        let parts: Vec<&str> = cond_str.split("<=").map(|s| s.trim()).collect();
+        if parts.len() == 2 {
+            return Ok(Condition::LessOrEqual(
+                parse_expression(parts[0], line_num)?,
+                parse_expression(parts[1], line_num)?,
+            ));
+        }
+    }
+    if cond_str.contains('>') {
+        let parts: Vec<&str> = cond_str.split('>').map(|s| s.trim()).collect();
+        if parts.len() == 2 {
+            return Ok(Condition::GreaterThan(
+                parse_expression(parts[0], line_num)?,
+                parse_expression(parts[1], line_num)?,
+            ));
+        }
+    }
+    if cond_str.contains('<') {
+        let parts: Vec<&str> = cond_str.split('<').map(|s| s.trim()).collect();
+        if parts.len() == 2 {
+            return Ok(Condition::LessThan(
+                parse_expression(parts[0], line_num)?,
+                parse_expression(parts[1], line_num)?,
+            ));
+        }
+    }
+    
+    anyhow::bail!("Invalid condition: {} at line {}", cond_str, line_num);
+}
+
 pub fn build_packets(script: &PacketScript) -> Result<Vec<Vec<u8>>> {
     println!("[BUILD] Starting packet construction with {} pair(s)", script.pairs.len());
     let mut built_packets = Vec::new();
 
     for (pair_idx, pair) in script.pairs.iter().enumerate() {
-        let packet_commands = &pair.packet;
-        println!("[BUILD] Building packet {} (pair {}) with {} commands", pair_idx + 1, pair_idx + 1, packet_commands.len());
-        let packet_idx = pair_idx + 1; // For logging compatibility
-        let mut packet = Vec::new();
-        let mut varint_placeholders = Vec::new();
+        // Build all packets for this pair
+        for (packet_in_pair_idx, packet_commands) in pair.packets.iter().enumerate() {
+            println!("[BUILD] Building packet {} (pair {}, packet {}) with {} commands", 
+                     built_packets.len() + 1, pair_idx + 1, packet_in_pair_idx + 1, packet_commands.len());
+            let packet_idx = built_packets.len() + 1; // For logging compatibility
+            let mut packet = Vec::new();
+            let mut varint_placeholders = Vec::new();
         let mut int_placeholders = Vec::new(); // (position, big_endian)
 
         for (idx, cmd) in packet_commands.iter().enumerate() {
@@ -589,9 +1330,10 @@ pub fn build_packets(script: &PacketScript) -> Result<Vec<Vec<u8>>> {
             packet[placeholder_pos..placeholder_pos + 4].copy_from_slice(&bytes);
         }
         
-        println!("[BUILD] Packet {} construction complete: {} payload bytes (hex: {})", 
-                 packet_idx + 1, packet.len(), hex::encode(&packet));
-        built_packets.push(packet);
+            println!("[BUILD] Packet {} construction complete: {} payload bytes (hex: {})", 
+                     packet_idx + 1, packet.len(), hex::encode(&packet));
+            built_packets.push(packet);
+        }
     }
 
     println!("[BUILD] All packets built: {} packet(s) total", built_packets.len());
@@ -617,10 +1359,10 @@ fn encode_varint(mut value: u64) -> Vec<u8> {
 pub fn parse_response(
     response_commands: &[ResponseCommand],
     response: &[u8],
-) -> Result<(HashMap<String, serde_json::Value>, usize)> {
+) -> Result<(IndexMap<String, serde_json::Value>, usize)> {
     println!("[PARSE] Starting response parsing: {} bytes received (hex: {})", 
              response.len(), hex::encode(response));
-    let mut vars = HashMap::new();
+    let mut vars = IndexMap::new();
     let mut cursor = 0;
 
     for (idx, cmd) in response_commands.iter().enumerate() {
@@ -748,6 +1490,290 @@ pub fn parse_response(
     println!("[PARSE] Response parsing complete: {} variables extracted, {} bytes consumed", 
              vars.len(), cursor);
     Ok((vars, cursor))
+}
+
+pub fn execute_code_blocks(
+    code_blocks: &[CodeBlock],
+    parsed_vars: &mut IndexMap<String, JsonValue>,
+) -> Result<IndexMap<String, JsonValue>> {
+    println!("[EXEC] Executing {} code block(s)...", code_blocks.len());
+    println!("[EXEC] Available parsed variables: {:?}", parsed_vars.keys().collect::<Vec<_>>());
+    let mut code_vars = IndexMap::new();
+    
+    for (block_idx, block) in code_blocks.iter().enumerate() {
+        println!("[EXEC] Executing code block {} with {} commands...", block_idx + 1, block.commands.len());
+        
+        for (cmd_idx, cmd) in block.commands.iter().enumerate() {
+            println!("[EXEC] Block {} Command {}: {:?}", block_idx + 1, cmd_idx + 1, cmd);
+            match execute_code_command(cmd, parsed_vars, &mut code_vars) {
+                Ok(()) => {
+                    println!("[EXEC] Block {} Command {} executed successfully", block_idx + 1, cmd_idx + 1);
+                }
+                Err(e) => {
+                    println!("[EXEC] Block {} Command {} failed: {}", block_idx + 1, cmd_idx + 1, e);
+                    return Err(e);
+                }
+            }
+        }
+    }
+    
+    println!("[EXEC] Code execution complete: {} variables created: {:?}", 
+             code_vars.len(), code_vars.keys().collect::<Vec<_>>());
+    Ok(code_vars)
+}
+
+fn execute_code_command(
+    cmd: &CodeCommand,
+    parsed_vars: &IndexMap<String, JsonValue>,
+    code_vars: &mut IndexMap<String, JsonValue>,
+) -> Result<()> {
+    match cmd {
+        CodeCommand::DeclareVar { var_type, name, value } => {
+            let evaluated = evaluate_expression(value, parsed_vars, code_vars)?;
+            println!("[EXEC] Declaring variable {} ({:?}) = {:?}", name, var_type, evaluated);
+            code_vars.insert(name.clone(), evaluated);
+        }
+        CodeCommand::AssignVar { name, value } => {
+            let evaluated = evaluate_expression(value, parsed_vars, code_vars)?;
+            println!("[EXEC] Assigning variable {} = {:?}", name, evaluated);
+            // Update in code_vars if exists, otherwise create
+            code_vars.insert(name.clone(), evaluated);
+        }
+        CodeCommand::Split { var_name, source_expr, delimiter } => {
+            let source_value = evaluate_expression(source_expr, parsed_vars, code_vars)?;
+            let source_str = source_value.as_str()
+                .ok_or_else(|| anyhow::anyhow!("SPLIT source expression is not a string"))?;
+            
+            let parts: Vec<JsonValue> = source_str
+                .split(delimiter)
+                .map(|s| JsonValue::String(s.to_string()))
+                .collect();
+            
+            println!("[EXEC] SPLIT expression by '{}' -> {} parts", delimiter, parts.len());
+            code_vars.insert(var_name.clone(), JsonValue::Array(parts));
+        }
+        CodeCommand::Replace { var_name, source_expr, search, replace } => {
+            let source_value = evaluate_expression(source_expr, parsed_vars, code_vars)?;
+            let source_str = source_value.as_str()
+                .ok_or_else(|| anyhow::anyhow!("REPLACE source expression is not a string"))?;
+            
+            let result = source_str.replace(search, replace);
+            println!("[EXEC] REPLACE in expression: '{}' -> '{}'", search, replace);
+            code_vars.insert(var_name.clone(), JsonValue::String(result));
+        }
+        CodeCommand::ForLoop { .. } => {
+            // TODO: Implement FOR loop execution
+            println!("[EXEC] FOR loop execution not yet implemented");
+        }
+        CodeCommand::ForInArray { var_name, array_name, body } => {
+            println!("[EXEC] FOR {} IN {}: executing loop", var_name, array_name);
+            let array_value = get_variable_value(array_name, parsed_vars, code_vars)?;
+            let array = array_value.as_array()
+                .ok_or_else(|| anyhow::anyhow!("Variable '{}' is not an array", array_name))?;
+            
+            for (idx, item) in array.iter().enumerate() {
+                println!("[EXEC] FOR loop iteration {}: {} = {:?}", idx, var_name, item);
+                // Set the loop variable
+                code_vars.insert(var_name.clone(), item.clone());
+                
+                // Execute body
+                let mut should_break = false;
+                for body_cmd in body {
+                    match execute_code_command(body_cmd, parsed_vars, code_vars) {
+                        Ok(()) => {}
+                        Err(e) if e.to_string().contains("BREAK") => {
+                            should_break = true;
+                            break;
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+                
+                if should_break {
+                    println!("[EXEC] FOR loop broken");
+                    break;
+                }
+            }
+        }
+        CodeCommand::IfStatement { condition, body, else_if, else_body } => {
+            println!("[EXEC] IF statement: evaluating condition");
+            let condition_result = evaluate_condition(condition, parsed_vars, code_vars)?;
+            
+            if condition_result {
+                println!("[EXEC] IF condition true, executing body");
+                for body_cmd in body {
+                    execute_code_command(body_cmd, parsed_vars, code_vars)?;
+                }
+            } else {
+                // Check else-if conditions
+                let mut matched = false;
+                for (else_cond, else_body_cmds) in else_if {
+                    if evaluate_condition(else_cond, parsed_vars, code_vars)? {
+                        println!("[EXEC] ELSE-IF condition true, executing body");
+                        for body_cmd in else_body_cmds {
+                            execute_code_command(body_cmd, parsed_vars, code_vars)?;
+                        }
+                        matched = true;
+                        break;
+                    }
+                }
+                
+                // Execute else body if no else-if matched
+                if !matched {
+                    if let Some(else_body_cmds) = else_body {
+                        println!("[EXEC] IF condition false, executing else body");
+                        for body_cmd in else_body_cmds {
+                            execute_code_command(body_cmd, parsed_vars, code_vars)?;
+                        }
+                    }
+                }
+            }
+        }
+        CodeCommand::Break => {
+            println!("[EXEC] BREAK encountered");
+            return Err(anyhow::anyhow!("BREAK"));
+        }
+        CodeCommand::ExecutePacketCommand(_) => {
+            // TODO: Nested packet command execution
+            println!("[EXEC] Nested packet command execution not yet implemented");
+        }
+        CodeCommand::ExecuteResponseCommand(_) => {
+            // TODO: Nested response command execution
+            println!("[EXEC] Nested response command execution not yet implemented");
+        }
+    }
+    Ok(())
+}
+
+fn evaluate_condition(
+    condition: &Condition,
+    parsed_vars: &IndexMap<String, JsonValue>,
+    code_vars: &IndexMap<String, JsonValue>,
+) -> Result<bool> {
+    match condition {
+        Condition::Equals(left, right) => {
+            let left_val = evaluate_expression(left, parsed_vars, code_vars)?;
+            let right_val = evaluate_expression(right, parsed_vars, code_vars)?;
+            Ok(left_val == right_val)
+        }
+        Condition::NotEquals(left, right) => {
+            let left_val = evaluate_expression(left, parsed_vars, code_vars)?;
+            let right_val = evaluate_expression(right, parsed_vars, code_vars)?;
+            Ok(left_val != right_val)
+        }
+        Condition::GreaterThan(left, right) => {
+            let left_val = evaluate_expression(left, parsed_vars, code_vars)?;
+            let right_val = evaluate_expression(right, parsed_vars, code_vars)?;
+            compare_values(&left_val, &right_val, |a, b| a > b)
+        }
+        Condition::LessThan(left, right) => {
+            let left_val = evaluate_expression(left, parsed_vars, code_vars)?;
+            let right_val = evaluate_expression(right, parsed_vars, code_vars)?;
+            compare_values(&left_val, &right_val, |a, b| a < b)
+        }
+        Condition::GreaterOrEqual(left, right) => {
+            let left_val = evaluate_expression(left, parsed_vars, code_vars)?;
+            let right_val = evaluate_expression(right, parsed_vars, code_vars)?;
+            compare_values(&left_val, &right_val, |a, b| a >= b)
+        }
+        Condition::LessOrEqual(left, right) => {
+            let left_val = evaluate_expression(left, parsed_vars, code_vars)?;
+            let right_val = evaluate_expression(right, parsed_vars, code_vars)?;
+            compare_values(&left_val, &right_val, |a, b| a <= b)
+        }
+        Condition::Contains(left, right) => {
+            let left_val = evaluate_expression(left, parsed_vars, code_vars)?;
+            let right_val = evaluate_expression(right, parsed_vars, code_vars)?;
+            let left_str = left_val.as_str()
+                .ok_or_else(|| anyhow::anyhow!("CONTAINS left operand must be a string"))?;
+            let right_str = right_val.as_str()
+                .ok_or_else(|| anyhow::anyhow!("CONTAINS right operand must be a string"))?;
+            Ok(left_str.contains(right_str))
+        }
+    }
+}
+
+fn compare_values<F>(left: &JsonValue, right: &JsonValue, cmp: F) -> Result<bool>
+where
+    F: FnOnce(f64, f64) -> bool,
+{
+    let left_num = left.as_f64()
+        .or_else(|| left.as_u64().map(|n| n as f64))
+        .or_else(|| left.as_i64().map(|n| n as f64))
+        .ok_or_else(|| anyhow::anyhow!("Left operand must be a number"))?;
+    let right_num = right.as_f64()
+        .or_else(|| right.as_u64().map(|n| n as f64))
+        .or_else(|| right.as_i64().map(|n| n as f64))
+        .ok_or_else(|| anyhow::anyhow!("Right operand must be a number"))?;
+    Ok(cmp(left_num, right_num))
+}
+
+fn evaluate_expression(
+    expr: &Expression,
+    parsed_vars: &IndexMap<String, JsonValue>,
+    code_vars: &IndexMap<String, JsonValue>,
+) -> Result<JsonValue> {
+    match expr {
+        Expression::Literal(value) => Ok(value.clone()),
+        Expression::Variable(name) => {
+            get_variable_value(name, parsed_vars, code_vars)
+        }
+        Expression::ArrayIndex { array_name, index } => {
+            // Get the array value
+            let array_value = get_variable_value(array_name, parsed_vars, code_vars)?;
+            let array = array_value.as_array()
+                .ok_or_else(|| anyhow::anyhow!("Variable '{}' is not an array", array_name))?;
+            
+            // Evaluate the index expression
+            let index_value = evaluate_expression(index, parsed_vars, code_vars)?;
+            let index_num = index_value.as_u64()
+                .or_else(|| index_value.as_i64().map(|i| i as u64))
+                .ok_or_else(|| anyhow::anyhow!("Array index must be a number, got: {:?}", index_value))?;
+            
+            // Get the element at the index
+            let idx = index_num as usize;
+            if idx >= array.len() {
+                anyhow::bail!("Array index {} out of bounds for array of length {}", idx, array.len());
+            }
+            
+            Ok(array[idx].clone())
+        }
+        Expression::FunctionCall { name, args } => {
+            // Handle array literals
+            if name == "__array_literal__" {
+                let elements: Result<Vec<JsonValue>> = args.iter()
+                    .map(|arg| evaluate_expression(arg, parsed_vars, code_vars))
+                    .collect();
+                return Ok(JsonValue::Array(elements?));
+            }
+            
+            // Evaluate function calls
+            let _evaluated_args: Result<Vec<JsonValue>> = args.iter()
+                .map(|arg| evaluate_expression(arg, parsed_vars, code_vars))
+                .collect();
+            
+            // Handle built-in functions
+            match name.as_str() {
+                // Add more functions as needed
+                _ => anyhow::bail!("Unknown function: {}", name),
+            }
+        }
+    }
+}
+
+fn get_variable_value(
+    name: &str,
+    parsed_vars: &IndexMap<String, JsonValue>,
+    code_vars: &IndexMap<String, JsonValue>,
+) -> Result<JsonValue> {
+    // Check code_vars first (most recent), then parsed_vars
+    if let Some(value) = code_vars.get(name) {
+        Ok(value.clone())
+    } else if let Some(value) = parsed_vars.get(name) {
+        Ok(value.clone())
+    } else {
+        anyhow::bail!("Variable '{}' not found", name)
+    }
 }
 
 fn read_varint(response: &[u8], cursor: &mut usize) -> Result<u64> {

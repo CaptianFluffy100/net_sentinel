@@ -250,9 +250,43 @@
         }
 
         .pseudo-output .parsed-table {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 10px;
+            display: table;
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+        }
+
+        .parsed-table thead {
+            background: #1e293b;
+        }
+
+        .parsed-table th {
+            text-align: left;
+            padding: 10px;
+            color: #cbd5e1;
+            font-size: 0.85rem;
+            font-weight: 600;
+            border-bottom: 2px solid #334155;
+        }
+
+        .parsed-table tbody tr {
+            border-bottom: 1px solid #334155;
+        }
+
+        .parsed-table tbody tr:hover {
+            background: #0f172a;
+        }
+
+        .parsed-table td {
+            padding: 10px;
+            color: #e2e8f0;
+            font-size: 0.875rem;
+        }
+
+        .parsed-table td:first-child {
+            color: #cbd5e1;
+            font-weight: 500;
+            width: 30%;
         }
 
         .parsed-row {
@@ -510,21 +544,46 @@ RESPONSE_END</textarea>
                     <p class="editor-status" id="editor-status">Status: Ready to test your script</p>
                     <pre id="editor-raw">Raw Response will appear here after preview</pre>
                     <div>
+                        <p class="editor-subtitle">Variables</p>
+                        <table class="parsed-table" id="editor-variables">
+                            <thead>
+                                <tr>
+                                    <th>Variable</th>
+                                    <th>Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>No variables</td>
+                                    <td>Variables from CODE blocks will appear here</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div>
                         <p class="editor-subtitle">Parsed Values</p>
-                        <div class="parsed-table" id="editor-parsed">
-                            <div class="parsed-row">
-                                <strong>packet_type</strong>
-                                <span>0x49 (73)</span>
-                            </div>
-                            <div class="parsed-row">
-                                <strong>session_id</strong>
-                                <span>"session-abc123"</span>
-                            </div>
-                            <div class="parsed-row">
-                                <strong>challenge_token</strong>
-                                <span>"token-987"</span>
-                            </div>
-                        </div>
+                        <table class="parsed-table" id="editor-parsed">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>packet_type</td>
+                                    <td>0x49 (73)</td>
+                                </tr>
+                                <tr>
+                                    <td>session_id</td>
+                                    <td>"session-abc123"</td>
+                                </tr>
+                                <tr>
+                                    <td>challenge_token</td>
+                                    <td>"token-987"</td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                     <p class="editor-subtitle" id="editor-response-time">Response Time: --</p>
                     <div class="output-section">
@@ -807,6 +866,7 @@ Parsed Values:
         const pseudoCodeInput = document.getElementById('pseudo-code-input');
         const editorStatus = document.getElementById('editor-status');
         const editorRaw = document.getElementById('editor-raw');
+        const editorVariables = document.getElementById('editor-variables');
         const editorParsed = document.getElementById('editor-parsed');
         const editorResponseTime = document.getElementById('editor-response-time');
         const editorOutputSuccess = document.getElementById('editor-output-success');
@@ -831,16 +891,99 @@ Parsed Values:
         const editorLog = document.getElementById('editor-log');
 
         function renderParsed(values) {
-            editorParsed.innerHTML = values
+            if (!values || values.length === 0) {
+                editorParsed.innerHTML = `
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>No parsed values</td>
+                            <td>Parsed values will appear here after test</td>
+                        </tr>
+                    </tbody>
+                `;
+                return;
+            }
+            // Values array should already be in order
+            const rows = values
                 .map(
                     (item) => `
-                        <div class="parsed-row">
-                            <strong>${item.name}</strong>
-                            <span>${item.value}</span>
-                        </div>
+                        <tr>
+                            <td>${item.name}</td>
+                            <td>${item.value}</td>
+                        </tr>
                     `
                 )
                 .join('');
+            editorParsed.innerHTML = `
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows}
+                </tbody>
+            `;
+        }
+
+        function renderVariables(variables) {
+            if (!variables || Object.keys(variables).length === 0) {
+                editorVariables.innerHTML = `
+                    <thead>
+                        <tr>
+                            <th>Variable</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>No variables</td>
+                            <td>Variables from CODE blocks will appear here</td>
+                        </tr>
+                    </tbody>
+                `;
+                return;
+            }
+            // Object.entries preserves insertion order in modern JavaScript
+            const rows = Object.entries(variables)
+                .map(
+                    ([name, value]) => {
+                        let displayValue = value;
+                        if (typeof value === 'object') {
+                            if (Array.isArray(value)) {
+                                displayValue = `[${value.map(v => JSON.stringify(v)).join(', ')}]`;
+                            } else {
+                                displayValue = JSON.stringify(value);
+                            }
+                        } else if (typeof value === 'string') {
+                            displayValue = `"${value}"`;
+                        }
+                        return `
+                            <tr>
+                                <td>${name}</td>
+                                <td>${displayValue}</td>
+                            </tr>
+                        `;
+                    }
+                )
+                .join('');
+            editorVariables.innerHTML = `
+                <thead>
+                    <tr>
+                        <th>Variable</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows}
+                </tbody>
+            `;
         }
 
         function formatParsedValues(value) {
@@ -870,10 +1013,11 @@ Parsed Values:
             editorLog.scrollTop = editorLog.scrollHeight;
         }
 
-        function renderEditorOutput({ status, raw, parsed, time, outputLabelsSuccess, outputLabelsError }) {
+        function renderEditorOutput({ status, raw, parsed, variables, time, outputLabelsSuccess, outputLabelsError }) {
             editorStatus.textContent = `Status: ${status}`;
             editorRaw.textContent = raw;
             editorResponseTime.textContent = `Response Time: ${time}`;
+            renderVariables(variables || {});
             renderParsed(parsed);
             renderOutputSections(outputLabelsSuccess || [], outputLabelsError || []);
         }
@@ -892,6 +1036,7 @@ Parsed Values:
                 status: 'Error: Server address required',
                 raw: defaultRawResponse,
                 parsed: defaultParsedValues,
+                variables: {},
                 time: '--',
                 outputLabelsSuccess: [],
                 outputLabelsError: [],
@@ -905,6 +1050,7 @@ Parsed Values:
                 status: 'Error: Provide a valid port (1-65535)',
                 raw: defaultRawResponse,
                 parsed: defaultParsedValues,
+                variables: {},
                 time: '--',
                 outputLabelsSuccess: [],
                 outputLabelsError: [],
@@ -918,6 +1064,7 @@ Parsed Values:
                 status: 'Error: Pseudo-code is required for testing',
                 raw: defaultRawResponse,
                 parsed: defaultParsedValues,
+                variables: {},
                 time: '--',
                 outputLabelsSuccess: [],
                 outputLabelsError: [],
@@ -929,6 +1076,7 @@ Parsed Values:
                 status: 'Running test...',
                 raw: defaultRawResponse,
                 parsed: defaultParsedValues,
+                variables: {},
                 time: '--',
                 outputLabelsSuccess: [],
                 outputLabelsError: [],
@@ -961,10 +1109,15 @@ Parsed Values:
                     ? '✅ Server response received'
                     : `❌ ${result.error?.message || 'Validation failed'}`;
                 const parsed = formatParsedValues(result.parsed_values);
+                // Extract variables from parsed_values (variables from CODE blocks)
+                // For now, we'll show all parsed values in both sections
+                // In the future, variables could be separated in the API response
+                const variables = result.variables || result.parsed_values || {};
                 renderEditorOutput({
                     status,
                     raw: result.raw_response ?? 'No response recorded',
                     parsed: parsed.length ? parsed : defaultParsedValues,
+                    variables: variables,
                     time: typeof result.response_time_ms === 'number' ? `${result.response_time_ms} ms` : '--',
                     outputLabelsSuccess: result.output_labels_success || [],
                     outputLabelsError: result.output_labels_error || [],
@@ -976,6 +1129,7 @@ Parsed Values:
                     status: `Error: ${error.message}`,
                     raw: defaultRawResponse,
                     parsed: defaultParsedValues,
+                    variables: {},
                     time: '--',
                     outputLabelsSuccess: [],
                     outputLabelsError: [],
@@ -1040,6 +1194,7 @@ Parsed Values:
                     status: `✅ Game server "${name}" saved successfully!`,
                     raw: editorRaw.textContent,
                     parsed: formatParsedValues({}),
+                    variables: {},
                     time: editorResponseTime.textContent,
                     outputLabelsSuccess: [],
                     outputLabelsError: [],
@@ -1050,6 +1205,7 @@ Parsed Values:
                     status: `Error: ${error.message}`,
                     raw: editorRaw.textContent,
                     parsed: defaultParsedValues,
+                    variables: {},
                     time: editorResponseTime.textContent,
                     outputLabelsSuccess: [],
                     outputLabelsError: [],
@@ -1063,6 +1219,7 @@ Parsed Values:
                 status: 'Editor reset',
                 raw: defaultRawResponse,
                 parsed: defaultParsedValues,
+                variables: {},
                 time: '--',
                 outputLabelsSuccess: [],
                 outputLabelsError: [],
@@ -1073,6 +1230,7 @@ Parsed Values:
             status: 'Ready to test your script',
             raw: defaultRawResponse,
             parsed: defaultParsedValues,
+            variables: {},
             time: '--',
             outputLabelsSuccess: [],
             outputLabelsError: [],

@@ -10,9 +10,10 @@ Complete reference for all pseudo-code commands available in Net Sentinel's game
 4. [Response Parsing Commands](#response-parsing-commands)
 5. [Validation Commands](#validation-commands)
 6. [Output Formatting Directives](#output-formatting-directives)
-7. [Comments](#comments)
-8. [Special Features](#special-features)
-9. [Complete Examples](#complete-examples)
+7. [Code Blocks and Variables](#code-blocks-and-variables)
+8. [Comments](#comments)
+9. [Special Features](#special-features)
+10. [Complete Examples](#complete-examples)
 
 ## Overview
 
@@ -498,6 +499,244 @@ RETURN "net_sentinel_gameserver_up{server='HOST', error=<ERROR REASON>} 0"
 
 ---
 
+## Code Blocks and Variables
+
+Code blocks allow you to declare variables, use control flow (loops, conditionals), and manipulate data before or after packet/response operations.
+
+**Note**: Code blocks are currently in development. Basic variable declarations and string functions are supported. FOR loops and IF statements require indentation handling which is being implemented. Execution logic for code blocks is being added.
+
+### `CODE_START` / `CODE_END`
+
+Marks the beginning and end of a code block. All variable declarations, loops, conditionals, and function calls must be within a code block.
+
+**Example**:
+```
+CODE_START
+STRING message = "Hello"
+INT count = 10
+CODE_END
+```
+
+---
+
+### Variable Declarations
+
+Variables can be declared with explicit types. Parsed values from `READ_*` commands are automatically available as variables.
+
+#### `STRING <var_name> = <value>`
+Declares a string variable.
+
+**Examples**:
+```
+STRING server_name = "My Server"
+STRING message = "Hello World"
+STRING parsed_data = JSON_PAYLOAD  # Can reference parsed variables
+```
+
+#### `INT <var_name> = <value>`
+Declares an integer variable.
+
+**Examples**:
+```
+INT player_count = 0
+INT max_players = 100
+INT response_id = RESPONSE_ID  # Can reference parsed variables
+```
+
+#### `BYTE <var_name> = <value>`
+Declares a byte variable (0-255).
+
+**Examples**:
+```
+BYTE status = 0xFF
+BYTE magic_byte = 0xFE
+```
+
+#### `FLOAT <var_name> = <value>`
+Declares a floating-point variable.
+
+**Examples**:
+```
+FLOAT tps = 20.0
+FLOAT version = 1.19
+```
+
+#### `ARRAY <var_name> = <value>`
+Declares an array variable. Arrays can be created from string splits or other operations.
+
+**Examples**:
+```
+ARRAY players = []  # Empty array
+ARRAY parts = SPLIT(data, ',')  # Array from SPLIT function
+```
+
+---
+
+### Variable Assignment
+
+Variables can be reassigned using the assignment operator.
+
+**Syntax**: `<var_name> = <value>`
+
+**Examples**:
+```
+count = 20
+message = "Updated message"
+server_name = NEW_SERVER_NAME  # Can reference other variables
+```
+
+---
+
+### FOR Loops
+
+FOR loops allow iteration over a range or array.
+
+#### `FOR <var_name> IN <start>..<end>:`
+Iterates over a numeric range (inclusive start, exclusive end).
+
+**Example**:
+```
+FOR i IN 0..4:
+  WRITE_BYTE i
+  # Loop body (indented)
+```
+
+**Note**: Loop body must be indented. The range is `start` (inclusive) to `end` (exclusive).
+
+#### `FOR <var_name> IN <array_name>:`
+Iterates over an array.
+
+**Example**:
+```
+ARRAY items = ["a", "b", "c"]
+FOR item IN items:
+  WRITE_STRING item
+  # Loop body (indented)
+```
+
+---
+
+### IF Statements
+
+IF statements allow conditional execution based on comparisons.
+
+#### `IF <condition>:`
+Executes code if the condition is true.
+
+**Syntax**:
+```
+IF <var1> == <var2>:
+  # Code block (indented)
+ELSE IF <var1> == <var3>:
+  # Code block (indented)
+ELSE:
+  # Code block (indented)
+```
+
+**Comparison Operators**:
+- `==` - Equals
+- `!=` - Not equals
+- `>` - Greater than
+- `<` - Less than
+- `>=` - Greater than or equal
+- `<=` - Less than or equal
+
+**Examples**:
+```
+IF response_id == 1:
+  WRITE_STRING "Success"
+ELSE:
+  WRITE_STRING "Error"
+
+IF player_count > 10:
+  WRITE_BYTE 0xFF
+ELSE IF player_count > 5:
+  WRITE_BYTE 0xFE
+ELSE:
+  WRITE_BYTE 0x00
+```
+
+**Note**: Code blocks must be indented. `ELSE IF` and `ELSE` are optional.
+
+---
+
+### String Functions
+
+#### `SPLIT(<var_name>, '<delimiter>')`
+Splits a string variable by a delimiter and stores the result as an array in the same variable.
+
+**Parameters**:
+- `<var_name>`: Variable containing the string to split
+- `<delimiter>`: Delimiter character or string (in single quotes)
+
+**Example**:
+```
+STRING data = "a,b,c"
+SPLIT(data, ',')
+# data is now an array: ["a", "b", "c"]
+```
+
+**Note**: The result overwrites the original variable with an array.
+
+---
+
+#### `REPLACE(<var_name>, '<search>', '<replace>')`
+Replaces all occurrences of a search string with a replace string in a variable.
+
+**Parameters**:
+- `<var_name>`: Variable containing the string to modify
+- `<search>`: String to search for (in single quotes)
+- `<replace>`: Replacement string (in single quotes)
+
+**Example**:
+```
+STRING message = "Hello World"
+REPLACE(message, 'World', 'Server')
+# message is now "Hello Server"
+```
+
+**Note**: The result overwrites the original variable.
+
+---
+
+### Using Variables in Packet/Response Commands
+
+Variables can be referenced in packet and response commands. The system will automatically substitute variable values.
+
+**Examples**:
+```
+CODE_START
+STRING command = "list"
+INT request_id = 1
+CODE_END
+
+PACKET_START
+WRITE_INT request_id
+WRITE_STRING command
+PACKET_END
+```
+
+**Note**: Variable substitution happens at execution time. Variables must be declared before use.
+
+---
+
+### Expression Evaluation
+
+Expressions can include:
+- **Literals**: `"string"`, `123`, `0xFF`, `20.5`
+- **Variables**: `var_name`
+- **Function calls**: `SPLIT(var, ',')`
+
+**Examples**:
+```
+STRING msg = "Hello"
+INT count = 10
+INT total = count + 5
+STRING combined = msg + " World"
+```
+
+---
+
 ## Comments
 
 Lines starting with `#` are treated as comments and ignored by the parser.
@@ -713,6 +952,106 @@ OUTPUT_END
 OUTPUT_ERROR
 RETURN "net_sentinel_gameserver_up{server='HOST', error=<ERROR REASON>} 0"
 OUTPUT_END
+```
+
+---
+
+### Example 5: Using Code Blocks with Variables
+
+```
+CODE_START
+STRING password = "my_rcon_password"
+INT auth_id = 1
+INT command_id = 2
+STRING command = "list"
+CODE_END
+
+# Authentication packet
+PACKET_START
+WRITE_INT PACKET_LEN
+WRITE_INT auth_id
+WRITE_INT 3
+WRITE_STRING password
+WRITE_BYTE 0x00
+WRITE_BYTE 0x00
+PACKET_END
+
+RESPONSE_START
+READ_INT response_length
+READ_INT response_id
+READ_INT response_type
+READ_STRING_NULL auth_result
+SKIP_BYTES 2
+RESPONSE_END
+
+# Command packet
+PACKET_START
+WRITE_INT PACKET_LEN
+WRITE_INT command_id
+WRITE_INT 2
+WRITE_STRING command
+WRITE_BYTE 0x00
+WRITE_BYTE 0x00
+PACKET_END
+
+RESPONSE_START
+READ_INT response_length
+READ_INT response_id
+READ_INT response_type
+READ_STRING_NULL command_output
+SKIP_BYTES 2
+RESPONSE_END
+```
+
+---
+
+### Example 6: Using FOR Loop
+
+```
+CODE_START
+INT count = 5
+CODE_END
+
+PACKET_START
+FOR i IN 0..count:
+  WRITE_BYTE i
+PACKET_END
+```
+
+---
+
+### Example 7: Using IF Statement
+
+```
+RESPONSE_START
+READ_INT response_id
+READ_STRING_NULL message
+RESPONSE_END
+
+CODE_START
+IF response_id == 1:
+  STRING status = "Success"
+ELSE:
+  STRING status = "Error"
+CODE_END
+```
+
+---
+
+### Example 8: Using String Functions
+
+```
+RESPONSE_START
+READ_STRING_NULL data
+RESPONSE_END
+
+CODE_START
+SPLIT(data, ',')
+# data is now an array of comma-separated values
+
+STRING cleaned = data
+REPLACE(cleaned, 'old', 'new')
+CODE_END
 ```
 
 ---

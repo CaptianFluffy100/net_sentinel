@@ -62,6 +62,8 @@ pub struct GameServerTestResult {
     pub response_time_ms: u64,
     pub raw_response: Option<String>,
     pub parsed_values: serde_json::Value,
+    #[serde(default)]
+    pub variables: serde_json::Value,
     pub error: Option<GameServerError>,
     #[serde(default)]
     pub output_labels_success: Vec<String>,

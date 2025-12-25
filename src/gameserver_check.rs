@@ -1,8 +1,8 @@
 use crate::models::{GameServer, Protocol, GameServerTestResult, GameServerError};
-use crate::packet_parser::{build_packets, parse_response, parse_script, OutputBlock, OutputCommand, OutputStatus};
+use crate::packet_parser::{build_packets, parse_response, parse_script, execute_code_blocks, OutputBlock, OutputCommand, OutputStatus};
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::collections::HashMap;
+use indexmap::IndexMap;
 use std::time::Instant;
 
 pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
@@ -25,6 +25,7 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                 response_time_ms: 0,
                 raw_response: None,
                 parsed_values: serde_json::json!({}),
+                variables: serde_json::json!({}),
                 error: Some(GameServerError {
                     error_type: "SyntaxError".to_string(),
                     message: e.to_string(),
@@ -51,6 +52,7 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                 response_time_ms: 0,
                 raw_response: None,
                 parsed_values: serde_json::json!({}),
+                variables: serde_json::json!({}),
                 error: Some(GameServerError {
                     error_type: "SyntaxError".to_string(),
                     message: e.to_string(),
@@ -67,7 +69,7 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
              script.pairs.len(), server.protocol, server.address, server.port, server.timeout_ms);
     
     let mut all_responses = Vec::new();
-    let mut all_parsed_vars = HashMap::new();
+    let mut all_parsed_vars = IndexMap::new();
     let mut last_error: Option<GameServerError> = None;
 
     // Create and maintain connection/socket for all pairs
@@ -85,6 +87,7 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                         response_time_ms: start.elapsed().as_millis() as u64,
                         raw_response: None,
                         parsed_values: serde_json::json!({}),
+                        variables: serde_json::json!({}),
                         error: Some(GameServerError {
                             error_type: "NetworkError".to_string(),
                             message: format!("Failed to create UDP socket: {}", e),
@@ -113,65 +116,101 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
             results
         },
         Protocol::Tcp => {
-            // Create TCP connection once and reuse for all pairs
+            // Create TCP connection and manage it per pair (may be closed/reopened)
             use tokio::net::TcpStream;
             use tokio::time::{timeout, Duration};
             
             let addr = format!("{}:{}", server.address, server.port);
             let timeout_duration = Duration::from_millis(server.timeout_ms);
             
-            println!("[TCP] Connecting to {} (timeout: {}ms)...", addr, server.timeout_ms);
-            let mut stream = match timeout(timeout_duration, TcpStream::connect(&addr)).await {
-                Ok(Ok(s)) => s,
-                Ok(Err(e)) => {
-                    return GameServerTestResult {
-                        success: false,
-                        response_time_ms: start.elapsed().as_millis() as u64,
-                        raw_response: None,
-                        parsed_values: serde_json::json!({}),
-                        error: Some(GameServerError {
-                            error_type: "NetworkError".to_string(),
-                            message: format!("Failed to connect to server: {}", e),
-                            line: None,
-                        }),
-                        output_labels_success: Vec::new(),
-                        output_labels_error: Vec::new(),
-                    };
-                }
-                Err(_) => {
-                    return GameServerTestResult {
-                        success: false,
-                        response_time_ms: start.elapsed().as_millis() as u64,
-                        raw_response: None,
-                        parsed_values: serde_json::json!({}),
-                        error: Some(GameServerError {
-                            error_type: "NetworkError".to_string(),
-                            message: "Connection timeout".to_string(),
-                            line: None,
-                        }),
-                        output_labels_success: Vec::new(),
-                        output_labels_error: Vec::new(),
-                    };
-                }
-            };
-            println!("[TCP] Connected successfully, connection will be reused for all {} pair(s)", script.pairs.len());
-            
-            // Execute all pairs with the same connection
+            let mut stream: Option<TcpStream> = None;
             let mut results = Vec::new();
-            for (pair_idx, _pair) in script.pairs.iter().enumerate() {
-                println!("[CHECK] Executing pair {} of {}...", pair_idx + 1, script.pairs.len());
-                let packet = &built_packets[pair_idx];
-                match send_packet_tcp(&mut stream, packet, timeout_duration).await {
-                    Ok(response) => results.push(Ok(response)),
-                    Err(e) => {
-                        results.push(Err(e));
+            
+            // Track packet index across all pairs
+            let mut global_packet_idx = 0;
+            
+            for (pair_idx, pair) in script.pairs.iter().enumerate() {
+                println!("[CHECK] Executing pair {} of {} ({} packet(s))...", pair_idx + 1, script.pairs.len(), pair.packets.len());
+                
+                // Check if we need to close connection before this pair
+                if pair.close_connection_before {
+                    if stream.take().is_some() {
+                        println!("[TCP] Closing connection before pair {}", pair_idx + 1);
+                        // Connection is closed when dropped
+                    }
+                }
+                
+                // Check if we need to open a new connection
+                if stream.is_none() {
+                    println!("[TCP] Connecting to {} (timeout: {}ms)...", addr, server.timeout_ms);
+                    match timeout(timeout_duration, TcpStream::connect(&addr)).await {
+                        Ok(Ok(s)) => {
+                            stream = Some(s);
+                            println!("[TCP] Connected successfully");
+                        },
+                        Ok(Err(e)) => {
+                            results.push(Err(anyhow::anyhow!("Failed to connect to server: {}", e)));
+                            break;
+                        },
+                        Err(_) => {
+                            results.push(Err(anyhow::anyhow!("Connection timeout")));
+                            break;
+                        }
+                    }
+                }
+                
+                // Send all packets for this pair (without waiting for responses)
+                match stream.as_mut() {
+                    Some(s) => {
+                        for (packet_in_pair_idx, _packet_commands) in pair.packets.iter().enumerate() {
+                            let packet = &built_packets[global_packet_idx];
+                            println!("[TCP] Sending packet {} of pair {} (packet {} total)...", 
+                                     packet_in_pair_idx + 1, pair_idx + 1, global_packet_idx + 1);
+                            match send_packet_tcp_no_response(s, packet).await {
+                                Ok(_) => {
+                                    println!("[TCP] Packet {} sent successfully", global_packet_idx + 1);
+                                },
+                                Err(e) => {
+                                    results.push(Err(anyhow::anyhow!("Failed to send packet {}: {}", global_packet_idx + 1, e)));
+                                    stream = None; // Connection is likely broken
+                                    break;
+                                }
+                            }
+                            global_packet_idx += 1;
+                        }
+                        
+                        // After all packets are sent, wait for response (only if there's a response defined)
+                        if !pair.response.is_empty() {
+                            if let Some(s) = stream.as_mut() {
+                                println!("[TCP] All packets for pair {} sent, waiting for response...", pair_idx + 1);
+                                match receive_packet_tcp(s, timeout_duration).await {
+                                    Ok(response) => {
+                                        println!("[TCP] Response received: {} bytes", response.len());
+                                        results.push(Ok(response));
+                                    },
+                                    Err(e) => {
+                                        results.push(Err(e));
+                                        stream = None; // Connection is likely broken
+                                        break;
+                                    }
+                                }
+                            }
+                        } else {
+                            // No response expected, push empty result
+                            results.push(Ok(Vec::new()));
+                        }
+                    },
+                    None => {
+                        results.push(Err(anyhow::anyhow!("No connection available")));
                         break;
                     }
                 }
             }
             
-            // Connection will be closed when stream goes out of scope
-            println!("[TCP] All pairs complete, closing connection");
+            // Close connection if still open
+            if stream.is_some() {
+                println!("[TCP] All pairs complete, closing connection");
+            }
             results
         },
     };
@@ -226,13 +265,37 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
         all_responses.iter().map(|r| hex::encode(r)).collect::<Vec<_>>().join(" ")
     };
 
+    // Execute code blocks (variables from CODE_START/CODE_END)
+    // Do this even if there's an error, so variables are available for error output
+    let code_variables = match execute_code_blocks(&script.code_blocks, &mut all_parsed_vars) {
+        Ok(vars) => {
+            println!("[CHECK] Code blocks executed: {} variables created", vars.len());
+            vars
+        }
+        Err(e) => {
+            println!("[CHECK] Code block execution failed: {}", e);
+            // Continue anyway, but log the error
+            IndexMap::new()
+        }
+    };
+
+    let code_vars_count = code_variables.len();
+
+    // Merge code variables into parsed vars for output block evaluation
+    // Code variables can override parsed vars if they have the same name
+    let mut all_vars = all_parsed_vars.clone();
+    for (key, value) in code_variables.iter() {
+        all_vars.insert(key.clone(), value.clone());
+    }
+
     if let Some(err) = last_error {
-        let error_labels = evaluate_output_labels(&script, OutputStatus::Error, &mut HashMap::new(), server, Some(&err));
+        let error_labels = evaluate_output_labels(&script, OutputStatus::Error, &mut all_vars.clone(), server, Some(&err));
         return GameServerTestResult {
             success: false,
             response_time_ms,
             raw_response: Some(raw_response_hex),
             parsed_values: serde_json::json!({}),
+            variables: serde_json::json!({}),
             error: Some(err),
             output_labels_success: Vec::new(),
             output_labels_error: error_labels,
@@ -240,17 +303,19 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
     }
 
     // All pairs succeeded
-    let success_labels = evaluate_output_labels(&script, OutputStatus::Success, &mut all_parsed_vars.clone(), server, None);
+    let success_labels = evaluate_output_labels(&script, OutputStatus::Success, &mut all_vars.clone(), server, None);
     strip_placeholder_vars(&mut all_parsed_vars);
     let parsed_values: serde_json::Value = all_parsed_vars.clone().into_iter().collect();
+    let variables: serde_json::Value = code_variables.into_iter().collect();
 
-    println!("[CHECK] All pairs executed successfully: {} total variables extracted in {}ms", 
-             all_parsed_vars.len(), response_time_ms);
+    println!("[CHECK] All pairs executed successfully: {} parsed values, {} code variables in {}ms", 
+             all_parsed_vars.len(), code_vars_count, response_time_ms);
     GameServerTestResult {
         success: true,
         response_time_ms,
         raw_response: Some(raw_response_hex),
         parsed_values,
+        variables,
         error: None,
         output_labels_success: success_labels,
         output_labels_error: Vec::new(),
@@ -296,21 +361,27 @@ async fn send_single_udp_packet(
     }
 }
 
-async fn send_packet_udp(
+async fn send_packet_udp_no_response(
     socket: &tokio::net::UdpSocket,
     addr: &str,
     packet: &[u8],
-    timeout_ms: u64,
-) -> Result<Vec<u8>> {
-    use tokio::time::{timeout, Duration};
-
+) -> Result<()> {
     println!("[UDP] Sending packet ({} bytes) to {}...", packet.len(), addr);
     socket
         .send_to(packet, addr)
         .await
         .context("Failed to send UDP packet")?;
-    println!("[UDP] Packet sent successfully, waiting for response (timeout: {}ms)...", timeout_ms);
+    println!("[UDP] Packet sent successfully");
+    Ok(())
+}
 
+async fn receive_packet_udp(
+    socket: &tokio::net::UdpSocket,
+    timeout_ms: u64,
+) -> Result<Vec<u8>> {
+    use tokio::time::{timeout, Duration};
+
+    println!("[UDP] Waiting for response (timeout: {}ms)...", timeout_ms);
     let mut buf = vec![0u8; 16384];
     let timeout_duration = Duration::from_millis(timeout_ms);
 
@@ -329,22 +400,38 @@ async fn send_packet_udp(
     }
 }
 
-async fn send_packet_tcp(
+async fn send_packet_udp(
+    socket: &tokio::net::UdpSocket,
+    addr: &str,
+    packet: &[u8],
+    timeout_ms: u64,
+) -> Result<Vec<u8>> {
+    send_packet_udp_no_response(socket, addr, packet).await?;
+    receive_packet_udp(socket, timeout_ms).await
+}
+
+async fn send_packet_tcp_no_response(
     stream: &mut tokio::net::TcpStream,
     packet: &[u8],
-    timeout_duration: tokio::time::Duration,
-) -> Result<Vec<u8>> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::time::timeout;
+) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
 
     println!("[TCP] Sending packet ({} bytes)...", packet.len());
-    timeout(timeout_duration, stream.write_all(packet))
+    stream.write_all(packet)
         .await
-        .context("Send timeout")?
         .context("Failed to write packet")?;
-    println!("[TCP] Packet sent successfully, waiting for response...");
+    println!("[TCP] Packet sent successfully");
+    Ok(())
+}
 
-    // Read response
+async fn receive_packet_tcp(
+    stream: &mut tokio::net::TcpStream,
+    timeout_duration: tokio::time::Duration,
+) -> Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+    use tokio::time::timeout;
+
+    println!("[TCP] Waiting for response...");
     let mut buf = vec![0u8; 16384];
     let size = timeout(timeout_duration, stream.read(&mut buf))
         .await
@@ -352,6 +439,15 @@ async fn send_packet_tcp(
         .context("Failed to read response")?;
     println!("[TCP] Response received: {} bytes", size);
     Ok(buf[..size].to_vec())
+}
+
+async fn send_packet_tcp(
+    stream: &mut tokio::net::TcpStream,
+    packet: &[u8],
+    timeout_duration: tokio::time::Duration,
+) -> Result<Vec<u8>> {
+    send_packet_tcp_no_response(stream, packet).await?;
+    receive_packet_tcp(stream, timeout_duration).await
 }
 
 async fn send_udp_packets(
@@ -440,7 +536,7 @@ async fn send_single_tcp_packet(
 fn evaluate_output_labels(
     script: &crate::packet_parser::PacketScript,
     status: OutputStatus,
-    vars: &mut HashMap<String, Value>,
+    vars: &mut IndexMap<String, Value>,
     server: &GameServer,
     error: Option<&GameServerError>,
 ) -> Vec<String> {
@@ -457,7 +553,7 @@ fn evaluate_output_labels(
 fn process_output_blocks(
     blocks: &[OutputBlock],
     status: OutputStatus,
-    vars: &mut HashMap<String, Value>,
+    vars: &mut IndexMap<String, Value>,
     server: &GameServer,
     error: Option<&GameServerError>,
 ) -> Result<Vec<String>> {
@@ -470,7 +566,7 @@ fn process_output_blocks(
 
 fn evaluate_output_block(
     block: &OutputBlock,
-    vars: &mut HashMap<String, Value>,
+    vars: &mut IndexMap<String, Value>,
     server: &GameServer,
     error: Option<&GameServerError>,
 ) -> Result<Vec<String>> {
@@ -512,7 +608,7 @@ fn evaluate_output_block(
     Ok(results)
 }
 
-fn handle_json_output(var: &str, vars: &mut HashMap<String, Value>) -> Result<()> {
+fn handle_json_output(var: &str, vars: &mut IndexMap<String, Value>) -> Result<()> {
     println!("[CHECK] JSON_OUTPUT: Looking for variable '{}'", var);
     println!("[CHECK] JSON_OUTPUT: Available variables: {:?}", vars.keys().collect::<Vec<_>>());
     
@@ -548,7 +644,7 @@ fn handle_json_output(var: &str, vars: &mut HashMap<String, Value>) -> Result<()
 
 fn format_return(
     template: &str,
-    vars: &HashMap<String, Value>,
+    vars: &IndexMap<String, Value>,
     server: &GameServer,
     error: Option<&GameServerError>,
 ) -> String {
@@ -565,78 +661,112 @@ fn format_return(
         template = template.replace("ERROR", "");
     }
 
+    // Remove outer quotes if present (for quoted strings)
+    let mut template_str = template.trim();
+    let mut was_quoted = false;
+    if (template_str.starts_with('"') && template_str.ends_with('"')) ||
+       (template_str.starts_with('\'') && template_str.ends_with('\'')) {
+        template_str = &template_str[1..template_str.len() - 1];
+        was_quoted = true;
+    }
+
+    // Check if the entire template (after removing quotes) is just a variable name
+    if is_valid_var_name(template_str) {
+        // Entire template is a variable name, output as "varname=value"
+        if let Some(value) = resolve_var_path(template_str, vars) {
+            let result = format!("{}=\"{}\"", template_str, value);
+            println!("[CHECK] format_return: Entire template is variable '{}', result: '{}'", template_str, result);
+            return result;
+        }
+    }
+
+    // Now process the template and substitute variables
+    // Support both simple variable names and dot-notation paths (e.g., JSON_PAYLOAD.version.protocol)
     let mut result = String::new();
-    let mut token = String::new();
-    let mut in_quoted_placeholder = false;
-    let mut quoted_token = String::new();
+    let mut current_token = String::new();
+    let mut i = 0;
+    let chars: Vec<char> = template_str.chars().collect();
     
-    let mut chars = template.chars().peekable();
-    
-    while let Some(ch) = chars.next() {
-        // Handle quoted placeholders like 'HOST' or 'JSON_PAYLOAD.version.protocol'
-        if ch == '\'' && !in_quoted_placeholder {
-            // Check if this looks like a quoted placeholder (starts with letter or underscore)
-            // Also skip consecutive quotes that might be typos
-            if let Some(&next_ch) = chars.peek() {
-                if next_ch == '\'' {
-                    // Double quote - skip this one and check the next
-                    continue; // Skip this quote, will check the next iteration
-                } else if next_ch.is_ascii_alphabetic() || next_ch == '_' {
-                    in_quoted_placeholder = true;
-                    continue; // Skip the opening quote
-                }
-            }
-            result.push(ch);
-        } else if ch == '\'' && in_quoted_placeholder {
-            // End of quoted placeholder, resolve it and skip the closing quote
-            if !quoted_token.is_empty() {
-                result.push_str(&resolve_token(&quoted_token, vars, server));
-                quoted_token.clear();
-            }
-            in_quoted_placeholder = false;
-            continue; // Skip the closing quote
-        } else if in_quoted_placeholder {
-            // Building quoted token
-            if is_token_char(ch) {
-                quoted_token.push(ch);
-            } else {
-                // Not a valid token char, end the quoted placeholder
-                if !quoted_token.is_empty() {
-                    result.push_str(&resolve_token(&quoted_token, vars, server));
-                    quoted_token.clear();
-                }
-                in_quoted_placeholder = false;
-                result.push(ch);
-            }
-        } else if is_token_char(ch) {
-            // Regular unquoted token
-            token.push(ch);
+    while i < chars.len() {
+        let ch = chars[i];
+        
+        if is_token_char(ch) {
+            current_token.push(ch);
         } else {
             // Not a token character, resolve any pending token
-            if !token.is_empty() {
-                println!("[CHECK] format_return: Found non-token char '{}', resolving token: '{}'", ch, token);
-                result.push_str(&resolve_token(&token, vars, server));
-                token.clear();
+            if !current_token.is_empty() {
+                // Try to resolve as a variable path (supports dot notation)
+                // First check if it's a simple variable name, then try as a path
+                if is_valid_var_name(&current_token) || current_token.contains('.') {
+                    // Try resolving as a variable path (supports dot notation like JSON_PAYLOAD.version.protocol)
+                    match resolve_var_path(&current_token, vars) {
+                        Some(value) => {
+                            println!("[CHECK] format_return: Resolved path '{}' to '{}'", current_token, value);
+                            result.push_str(&value);
+                        },
+                        None => {
+                            // Not found as path, try as simple token (for special tokens like HOST, PORT)
+                            let resolved = resolve_token(&current_token, vars, server);
+                            result.push_str(&resolved);
+                        }
+                    }
+                } else {
+                    // Not a variable name or path, output as-is
+                    result.push_str(&current_token);
+                }
+                current_token.clear();
             }
             result.push(ch);
         }
+        i += 1;
     }
     
-    // Handle any remaining tokens
-    if !token.is_empty() {
-        println!("[CHECK] format_return: Resolving remaining token: '{}'", token);
-        result.push_str(&resolve_token(&token, vars, server));
+    // Handle any remaining token at the end
+    if !current_token.is_empty() {
+        // Try to resolve as a variable path (supports dot notation)
+        if is_valid_var_name(&current_token) || current_token.contains('.') {
+            match resolve_var_path(&current_token, vars) {
+                Some(value) => {
+                    println!("[CHECK] format_return: Resolved path '{}' to '{}'", current_token, value);
+                    result.push_str(&value);
+                },
+                None => {
+                    // Not found as path, try as simple token
+                    let resolved = resolve_token(&current_token, vars, server);
+                    result.push_str(&resolved);
+                }
+            }
+        } else {
+            // Not a variable name or path, output as-is
+            result.push_str(&current_token);
+        }
     }
-    if !quoted_token.is_empty() {
-        println!("[CHECK] format_return: Resolving remaining quoted token: '{}'", quoted_token);
-        result.push_str(&resolve_token(&quoted_token, vars, server));
+    
+    // If it was originally quoted, return as quoted string
+    if was_quoted {
+        result = format!("\"{}\"", result);
     }
     
     println!("[CHECK] format_return: Final result: '{}'", result);
     result
 }
 
-fn resolve_token(token: &str, vars: &HashMap<String, Value>, server: &GameServer) -> String {
+fn is_valid_var_name(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    let mut chars = s.chars();
+    // First character must be letter or underscore
+    if let Some(first) = chars.next() {
+        if !first.is_ascii_alphabetic() && first != '_' {
+            return false;
+        }
+    }
+    // Rest must be alphanumeric or underscore
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn resolve_token(token: &str, vars: &IndexMap<String, Value>, server: &GameServer) -> String {
     match token {
         "HOST_LEN" | "IP_LEN" => server.address.len().to_string(),
         "HOST" | "IP" => server.address.clone(),
@@ -657,7 +787,7 @@ fn resolve_token(token: &str, vars: &HashMap<String, Value>, server: &GameServer
     }
 }
 
-fn resolve_var_path(path: &str, vars: &HashMap<String, Value>) -> Option<String> {
+fn resolve_var_path(path: &str, vars: &IndexMap<String, Value>) -> Option<String> {
     let mut segments = path.split('.');
     let mut value = vars.get(segments.next()?);
     for segment in segments {
@@ -676,7 +806,7 @@ fn value_to_string(value: &Value) -> String {
     }
 }
 
-fn insert_server_placeholders(vars: &mut HashMap<String, Value>, server: &GameServer) {
+fn insert_server_placeholders(vars: &mut IndexMap<String, Value>, server: &GameServer) {
     vars.entry("HOST".to_string())
         .or_insert_with(|| Value::String(server.address.clone()));
     vars.entry("IP".to_string())
@@ -689,9 +819,9 @@ fn insert_server_placeholders(vars: &mut HashMap<String, Value>, server: &GameSe
         .or_insert_with(|| Value::Number(server.port.into()));
 }
 
-fn strip_placeholder_vars(vars: &mut HashMap<String, Value>) {
+fn strip_placeholder_vars(vars: &mut IndexMap<String, Value>) {
     for key in &["HOST", "IP", "HOST_LEN", "IP_LEN", "IP_LEN_HEX", "PORT"] {
-        vars.remove(*key);
+        vars.shift_remove(*key);
     }
 }
 
