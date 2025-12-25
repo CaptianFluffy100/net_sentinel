@@ -1,0 +1,51 @@
+{
+  "isps": [
+    {
+      "id": 1,
+      "name": "Google DNS",
+      "ip": "8.8.8.8"
+    },
+    {
+      "id": 2,
+      "name": "Cloudflare DNS",
+      "ip": "1.1.1.1"
+    }
+  ],
+  "websites": [
+    {
+      "id": 3,
+      "url": "https://ostrich.software/login",
+      "direct_connect": true,
+      "direct_connect_url": "http://10.0.2.151:3010"
+    },
+    {
+      "id": 4,
+      "url": "https://gameserver.dataforgedb.com/",
+      "direct_connect": true,
+      "direct_connect_url": "http://10.0.2.24/"
+    },
+    {
+      "id": 6,
+      "url": "https://www.riftboundatlas.com/",
+      "direct_connect": true,
+      "direct_connect_url": "http://10.0.2.17:3000"
+    },
+    {
+      "id": 8,
+      "url": "https://itemra.dataforgedb.com",
+      "direct_connect": false,
+      "direct_connect_url": null
+    }
+  ],
+  "game_servers": [
+    {
+      "id": 7,
+      "name": "Riftbound Atlas",
+      "address": "10.0.2.27",
+      "port": 26000,
+      "protocol": "TCP",
+      "timeout_ms": 2000,
+      "pseudo_code": "PACKET_START\nWRITE_VARINT PACKET_LEN\nWRITE_VARINT 0x00\nWRITE_VARINT 0x47\nWRITE_VARINT IP_LEN_HEX               # Length of \"10.0.2.27\"\nWRITE_STRING_LEN \"IP\" HOST_LEN\nWRITE_SHORT_BE PORT\nWRITE_VARINT 0x01\nPACKET_END\n\nPACKET_START\nWRITE_VARINT 0x01\nWRITE_VARINT 0x00\nPACKET_END\n\nRESPONSE_START\nREAD_VARINT LENGTH_VARINT\nREAD_VARINT PACKET_ID\nREAD_VARINT JSON_LENGTH_VARINT\nREAD_STRING_NULL JSON_PAYLOAD\nRESPONSE_END\n\nOUTPUT_SUCCESS\nJSON_OUTPUT JSON_PAYLOAD\nRETURN \"protocol=JSON_PAYLOAD.version.protocol, player_max=JSON_PAYLOAD.players.max, player_count=JSON_PAYLOAD.players.online\"\nOUTPUT_END\n\nOUTPUT_ERROR\nRETURN \"server='HOST', error=ERROR\"\nOUTPUT_END"
+    }
+  ]
+}

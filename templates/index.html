@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Net Sentinel - ISP Monitor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            line-height: 1.6;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #1e293b;
+        }
+
+        h1 {
+            color: #60a5fa;
+            margin-bottom: 10px;
+            font-size: 2.5rem;
+        }
+
+        .version {
+            color: #94a3b8;
+            font-size: 0.9rem;
+        }
+
+        .section {
+            background: #1e293b;
+            border-radius: 8px;
+            padding: 25px;
+            margin-bottom: 25px;
+            border: 1px solid #334155;
+        }
+
+        .section h2 {
+            color: #60a5fa;
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #cbd5e1;
+            font-weight: 500;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            color: #e2e8f0;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #60a5fa;
+        }
+
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #2563eb;
+        }
+
+        button:active {
+            background: #1d4ed8;
+        }
+
+        button.delete {
+            background: #ef4444;
+            padding: 8px 16px;
+            font-size: 0.9rem;
+        }
+
+        button.delete:hover {
+            background: #dc2626;
+        }
+
+        .isp-list {
+            margin-top: 20px;
+        }
+
+        .isp-item {
+            background: #0f172a;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid #334155;
+        }
+
+        .isp-info {
+            flex: 1;
+        }
+
+        .isp-name {
+            font-weight: 600;
+            color: #60a5fa;
+            margin-bottom: 5px;
+        }
+
+        .isp-ip {
+            color: #94a3b8;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #64748b;
+        }
+
+        .error {
+            background: #7f1d1d;
+            color: #fca5a5;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            border: 1px solid #991b1b;
+        }
+
+        .success {
+            background: #14532d;
+            color: #86efac;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            border: 1px solid #166534;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 180px;
+            background: #041029;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            color: #e2e8f0;
+            padding: 12px;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+            font-size: 0.95rem;
+            resize: vertical;
+        }
+
+        .editor-actions {
+            margin-top: 12px;
+            display: flex;
+            gap: 12px;
+        }
+
+        .editor-actions button {
+            flex: 1;
+        }
+
+        .copy-snippet {
+            margin-top: 6px;
+            font-size: 0.85rem;
+            background: #475569;
+            border: none;
+            color: #e2e8f0;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .copy-snippet:hover {
+            background: #64748b;
+        }
+
+        .editor-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+
+        .editor-panel label {
+            font-size: 0.85rem;
+            color: #94a3b8;
+            margin-bottom: 4px;
+            display: inline-block;
+        }
+
+        .editor-panel input,
+        .editor-panel select {
+            width: 100%;
+            padding: 10px;
+            background: #041029;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            color: #e2e8f0;
+            margin-bottom: 12px;
+        }
+
+        .pseudo-output {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 18px;
+            min-height: 320px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .pseudo-output pre {
+            background: #020617;
+            border-radius: 6px;
+            padding: 12px;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            overflow-x: auto;
+        }
+
+        .pseudo-output .parsed-table {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 10px;
+        }
+
+        .parsed-row {
+            background: #020617;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #334155;
+        }
+
+        .parsed-row strong {
+            display: block;
+            color: #cbd5e1;
+            font-size: 0.78rem;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .editor-subtitle {
+            color: #94a3b8;
+            font-size: 0.9rem;
+            margin-bottom: 8px;
+        }
+
+        .log-panel {
+            background: #020617;
+            border-radius: 6px;
+            border: 1px solid #334155;
+            padding: 10px;
+            max-height: 220px;
+            overflow-y: auto;
+        }
+
+        .log-entry {
+            font-size: 0.8rem;
+            line-height: 1.4;
+            margin-bottom: 6px;
+            color: #cbd5e1;
+        }
+
+        .log-entry.error {
+            color: #fca5a5;
+        }
+
+        .log-entry.success {
+            color: #86efac;
+        }
+
+        .output-labels {
+            margin-top: 12px;
+            padding: 10px;
+            border: 1px dashed #475569;
+            border-radius: 6px;
+            background: #031129;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+            font-size: 0.85rem;
+            color: #cbd5e1;
+            max-height: 160px;
+            overflow-y: auto;
+        }
+
+        .output-section {
+            margin-top: 12px;
+        }
+
+        .docs-wrapper {
+            margin-top: 25px;
+        }
+
+        details.docs {
+            border: 1px solid #334155;
+            border-radius: 10px;
+            background: #010b1d;
+            padding: 16px;
+            margin-top: 10px;
+        }
+
+        details.docs summary {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #60a5fa;
+            cursor: pointer;
+            list-style: none;
+        }
+
+        details.docs summary::-webkit-details-marker {
+            display: none;
+        }
+
+        details.docs[open] summary::after {
+            content: "↑";
+            float: right;
+        }
+
+        summary::after {
+            content: "↓";
+            float: right;
+            transition: transform 0.2s ease;
+        }
+
+        details.docs[open] summary::after {
+            transform: rotate(180deg);
+        }
+
+        .docs-content {
+            margin-top: 18px;
+            max-height: 380px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .docs-content h3 {
+            margin-bottom: 6px;
+            font-size: 1rem;
+            color: #93c5fd;
+        }
+
+        .docs-content p,
+        .docs-content li {
+            color: #cbd5e1;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .docs-section {
+            margin-bottom: 16px;
+        }
+
+        .docs-content pre {
+            background: #020617;
+            border-radius: 6px;
+            border: 1px solid #334155;
+            padding: 10px;
+            font-size: 0.85rem;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+            overflow-x: auto;
+            margin-bottom: 12px;
+        }
+    </style>
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Net Sentinel</h1>
+            <div class="version">Version: {{VERSION}}</div>
+        </header>
+
+        <div class="section">
+            <h2>Add ISP</h2>
+            <div id="message"></div>
+            <form id="isp-form">
+                <div class="form-group">
+                    <label for="isp-name">ISP Name</label>
+                    <input type="text" id="isp-name" name="name" placeholder="e.g., Google DNS, Cloudflare DNS" required>
+                </div>
+                <div class="form-group">
+                    <label for="isp-ip">IP Address</label>
+                    <input type="text" id="isp-ip" name="ip" placeholder="e.g., 8.8.8.8, 1.1.1.1" required>
+                </div>
+                <button type="submit">Add ISP</button>
+            </form>
+        </div>
+
+        <div class="section">
+            <h2>ISP List</h2>
+            <div id="isp-list" class="isp-list">
+                <div class="empty-state">Loading...</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Add Website</h2>
+            <div id="website-message"></div>
+            <form id="website-form">
+                <div class="form-group">
+                    <label for="website-url">URL</label>
+                    <input type="text" id="website-url" name="url" placeholder="e.g., example.com, https://example.com" required>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="website-direct-connect" name="direct_connect">
+                        Enable Direct Connect
+                    </label>
+                </div>
+                <div class="form-group" id="direct-url-group" style="display: none;">
+                    <label for="website-direct-url">Direct Connect URL (optional)</label>
+                    <input type="text" id="website-direct-url" name="direct_connect_url" placeholder="e.g., http://192.168.1.1">
+                    <small style="color: #94a3b8; font-size: 0.85rem;">If provided, this URL will be used for direct connection instead of resolving DNS.</small>
+                </div>
+                <button type="submit">Add Website</button>
+            </form>
+        </div>
+
+        <div class="section">
+            <h2>Website List</h2>
+            <div id="website-list" class="isp-list">
+                <div class="empty-state">Loading...</div>
+            </div>
+        </div>
+
+        <div class="section editor-section">
+            <h2>Game Server Pseudo-code Editor</h2>
+            <p class="editor-subtitle">Craft packets and preview how the parser would interpret your script before saving a configuration.</p>
+            <div class="editor-grid">
+                <div class="editor-panel">
+                    <div class="form-group">
+                        <label for="editor-name">Server Name</label>
+                        <input type="text" id="editor-name" name="editor_name" placeholder="My Game Server">
+                    </div>
+                    <div class="form-group">
+                        <label for="editor-address">Address</label>
+                        <input type="text" id="editor-address" name="editor_address" placeholder="example.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="editor-port">Port</label>
+                        <input type="text" id="editor-port" name="editor_port" placeholder="25565">
+                    </div>
+                    <div class="form-group">
+                        <label for="editor-protocol">Protocol</label>
+                        <select id="editor-protocol" name="editor_protocol">
+                            <option value="UDP">UDP</option>
+                            <option value="TCP">TCP</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="editor-timeout">Timeout (ms)</label>
+                        <input type="text" id="editor-timeout" name="editor_timeout" placeholder="5000">
+                    </div>
+                    <div class="form-group">
+                        <label for="pseudo-code-input">Pseudo-code</label>
+                        <textarea id="pseudo-code-input" spellcheck="false"># Minecraft-style query
+PACKET_START
+WRITE_BYTE 0xFE
+WRITE_BYTE 0xFD
+WRITE_BYTE 0x09
+WRITE_INT 0x00000000
+PACKET_END
+
+RESPONSE_START
+EXPECT_BYTE 0xFE
+EXPECT_BYTE 0xFD
+READ_BYTE packet_type
+READ_STRING_NULL session_id
+READ_STRING_NULL challenge_token
+RESPONSE_END</textarea>
+                    </div>
+                    <div class="editor-actions">
+                        <button type="button" id="editor-test">Test Server</button>
+                        <button type="button" id="editor-save">Save Game Server</button>
+                        <button type="button" id="editor-clear">Reset</button>
+                    </div>
+                </div>
+                <div class="pseudo-output" id="editor-output">
+                    <p class="editor-status" id="editor-status">Status: Ready to test your script</p>
+                    <pre id="editor-raw">Raw Response will appear here after preview</pre>
+                    <div>
+                        <p class="editor-subtitle">Parsed Values</p>
+                        <div class="parsed-table" id="editor-parsed">
+                            <div class="parsed-row">
+                                <strong>packet_type</strong>
+                                <span>0x49 (73)</span>
+                            </div>
+                            <div class="parsed-row">
+                                <strong>session_id</strong>
+                                <span>"session-abc123"</span>
+                            </div>
+                            <div class="parsed-row">
+                                <strong>challenge_token</strong>
+                                <span>"token-987"</span>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="editor-subtitle" id="editor-response-time">Response Time: --</p>
+                    <div class="output-section">
+                        <p class="editor-subtitle">Output Success</p>
+                        <div class="output-labels" id="editor-output-success">
+                            Output labels will appear here once the test finishes.
+                        </div>
+                    </div>
+                    <div class="output-section">
+                        <p class="editor-subtitle">Output Error</p>
+                        <div class="output-labels" id="editor-output-error">
+                            Error labels will appear here if the test fails.
+                        </div>
+                    </div>
+                    <div class="log-panel" id="editor-log">
+                        <div class="log-entry">Logs will appear here when a test runs.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section docs-wrapper">
+            <details class="docs">
+                <summary>Pseudo-code Reference</summary>
+                <div class="docs-content">
+                    <div class="docs-section">
+                        <h3>Packet Construction</h3>
+                        <p>Commands inside <strong>PACKET_START/END</strong> construct the bytes that will be sent to the server. Use decimal or hex literals.</p>
+                        <pre>WRITE_BYTE 0xFF
+WRITE_SHORT 1234
+WRITE_INT_BE 5000
+WRITE_STRING "STATUS"</pre>
+                    </div>
+                    <div class="docs-section">
+                        <h3>Response Parsing</h3>
+                        <p>Define the layout of the server's reply between <strong>RESPONSE_START</strong> and <strong>RESPONSE_END</strong>. support both length-based and null-terminated strings.</p>
+                        <pre>EXPECT_BYTE 0xFE
+READ_BYTE packet_type
+READ_STRING_NULL server_name
+SKIP_BYTES 4</pre>
+                    </div>
+                    <div class="docs-section">
+                        <h3>Validation</h3>
+                        <p>Use <code>EXPECT_*</code> commands to assert magic bytes before reading the payload, catching mismatched protocols early.</p>
+                        <pre>EXPECT_BYTE 0xFE
+EXPECT_MAGIC "FEEDFACE"</pre>
+                    </div>
+                    <div class="docs-section">
+                        <h3>Example Script</h3>
+                        <pre># Minecraft-style query
+PACKET_START
+WRITE_BYTE 0xFE
+WRITE_BYTE 0xFD
+WRITE_BYTE 0x09
+WRITE_INT 0x00000000
+PACKET_END
+
+RESPONSE_START
+EXPECT_BYTE 0xFE
+EXPECT_BYTE 0xFD
+READ_BYTE packet_type
+READ_STRING_NULL session_id
+READ_STRING_NULL challenge_token
+RESPONSE_END</pre>
+                    </div>
+                    <div class="docs-section">
+                        <h3>Output Preview</h3>
+                        <pre>Status: ✅ Success
+Response Time: 45 ms
+Raw Response: FF FE FD 09 00 00 00 00 00 00 00 00 05 74 65 73 74
+Parsed Values:
+- packet_type: 0x49 (73)
+- session_id: "session-abc123"
+- challenge_token: "token-987"</pre>
+                    </div>
+                </div>
+            </details>
+        </div>
+    </div>
+
+    <script>
+        const VERSION = '{{VERSION}}';
+
+        function showMessage(text, isError = false) {
+            const messageEl = document.getElementById('message');
+            messageEl.className = isError ? 'error' : 'success';
+            messageEl.textContent = text;
+            messageEl.style.display = 'block';
+            setTimeout(() => {
+                messageEl.style.display = 'none';
+            }, 5000);
+        }
+
+        async function loadISPs() {
+            try {
+                const response = await fetch('/api/isps');
+                if (!response.ok) throw new Error('Failed to fetch ISPs');
+                const isps = await response.json();
+                renderISPs(isps);
+            } catch (error) {
+                document.getElementById('isp-list').innerHTML = 
+                    `<div class="error">Error loading ISPs: ${error.message}</div>`;
+            }
+        }
+
+        function renderISPs(isps) {
+            const listEl = document.getElementById('isp-list');
+            if (isps.length === 0) {
+                listEl.innerHTML = '<div class="empty-state">No ISPs configured. Add one above to get started.</div>';
+                return;
+            }
+
+            listEl.innerHTML = isps.map(isp => `
+                <div class="isp-item">
+                    <div class="isp-info">
+                        <div class="isp-name">${escapeHtml(isp.name)}</div>
+                        <div class="isp-ip">${escapeHtml(isp.ip)}</div>
+                    </div>
+                    <button class="delete" onclick="deleteISP(${isp.id})">Delete</button>
+                </div>
+            `).join('');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        async function deleteISP(id) {
+            if (!confirm('Are you sure you want to delete this ISP?')) return;
+
+            try {
+                const response = await fetch(`/api/isps/${id}`, {
+                    method: 'DELETE'
+                });
+                if (!response.ok) throw new Error('Failed to delete ISP');
+                showMessage('ISP deleted successfully');
+                loadISPs();
+            } catch (error) {
+                showMessage(`Error deleting ISP: ${error.message}`, true);
+            }
+        }
+
+        document.getElementById('isp-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const data = {
+                name: formData.get('name'),
+                ip: formData.get('ip')
+            };
+
+            try {
+                const response = await fetch('/api/isps', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || 'Failed to create ISP');
+                }
+
+                showMessage('ISP added successfully');
+                e.target.reset();
+                loadISPs();
+            } catch (error) {
+                showMessage(`Error adding ISP: ${error.message}`, true);
+            }
+        });
+
+        // Load ISPs on page load
+        loadISPs();
+
+        // Website management
+        const directConnectCheckbox = document.getElementById('website-direct-connect');
+        const directUrlGroup = document.getElementById('direct-url-group');
+
+        directConnectCheckbox.addEventListener('change', function() {
+            directUrlGroup.style.display = this.checked ? 'block' : 'none';
+        });
+
+        async function loadWebsites() {
+            try {
+                const response = await fetch('/api/websites');
+                if (!response.ok) throw new Error('Failed to fetch websites');
+                const websites = await response.json();
+                renderWebsites(websites);
+            } catch (error) {
+                document.getElementById('website-list').innerHTML = 
+                    `<div class="error">Error loading websites: ${error.message}</div>`;
+            }
+        }
+
+        function renderWebsites(websites) {
+            const listEl = document.getElementById('website-list');
+            if (websites.length === 0) {
+                listEl.innerHTML = '<div class="empty-state">No websites configured. Add one above to get started.</div>';
+                return;
+            }
+
+            listEl.innerHTML = websites.map(website => `
+                <div class="isp-item">
+                    <div class="isp-info">
+                        <div class="isp-name">${escapeHtml(website.url)}</div>
+                        <div class="isp-ip">
+                            Direct Connect: ${website.direct_connect ? 'Yes' : 'No'}
+                            ${website.direct_connect_url ? ` | Direct URL: ${escapeHtml(website.direct_connect_url)}` : ''}
+                        </div>
+                    </div>
+                    <button class="delete" onclick="deleteWebsite(${website.id})">Delete</button>
+                </div>
+            `).join('');
+        }
+
+        async function deleteWebsite(id) {
+            if (!confirm('Are you sure you want to delete this website?')) return;
+
+            try {
+                const response = await fetch(`/api/websites/${id}`, {
+                    method: 'DELETE'
+                });
+                if (!response.ok) throw new Error('Failed to delete website');
+                showWebsiteMessage('Website deleted successfully');
+                loadWebsites();
+            } catch (error) {
+                showWebsiteMessage(`Error deleting website: ${error.message}`, true);
+            }
+        }
+
+        function showWebsiteMessage(text, isError = false) {
+            const messageEl = document.getElementById('website-message');
+            messageEl.className = isError ? 'error' : 'success';
+            messageEl.textContent = text;
+            messageEl.style.display = 'block';
+            setTimeout(() => {
+                messageEl.style.display = 'none';
+            }, 5000);
+        }
+
+        document.getElementById('website-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const directUrlValue = formData.get('direct_connect_url');
+            const data = {
+                url: formData.get('url'),
+                direct_connect: directConnectCheckbox.checked,
+                direct_connect_url: directConnectCheckbox.checked && directUrlValue && directUrlValue.trim() !== '' ? directUrlValue.trim() : null
+            };
+
+            try {
+                const response = await fetch('/api/websites', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || 'Failed to create website');
+                }
+
+                showWebsiteMessage('Website added successfully');
+                e.target.reset();
+                directUrlGroup.style.display = 'none';
+                loadWebsites();
+            } catch (error) {
+                showWebsiteMessage(`Error adding website: ${error.message}`, true);
+            }
+        });
+
+        // Load websites on page load
+        loadWebsites();
+
+        const pseudoCodeInput = document.getElementById('pseudo-code-input');
+        const editorStatus = document.getElementById('editor-status');
+        const editorRaw = document.getElementById('editor-raw');
+        const editorParsed = document.getElementById('editor-parsed');
+        const editorResponseTime = document.getElementById('editor-response-time');
+        const editorOutputSuccess = document.getElementById('editor-output-success');
+        const editorOutputError = document.getElementById('editor-output-error');
+        const editorTestButton = document.getElementById('editor-test');
+        const editorSaveButton = document.getElementById('editor-save');
+        const editorClearButton = document.getElementById('editor-clear');
+        const editorNameInput = document.getElementById('editor-name');
+        const editorAddressInput = document.getElementById('editor-address');
+        const editorPortInput = document.getElementById('editor-port');
+        const editorProtocolInput = document.getElementById('editor-protocol');
+        const editorTimeoutInput = document.getElementById('editor-timeout');
+
+        const defaultParsedValues = [
+            { name: 'packet_type', value: '0x49 (73)' },
+            { name: 'session_id', value: '"session-abc123"' },
+            { name: 'challenge_token', value: '"token-987"' },
+        ];
+
+        const defaultRawResponse = editorRaw.textContent;
+        const defaultPseudoCode = pseudoCodeInput.value;
+        const editorLog = document.getElementById('editor-log');
+
+        function renderParsed(values) {
+            editorParsed.innerHTML = values
+                .map(
+                    (item) => `
+                        <div class="parsed-row">
+                            <strong>${item.name}</strong>
+                            <span>${item.value}</span>
+                        </div>
+                    `
+                )
+                .join('');
+        }
+
+        function formatParsedValues(value) {
+            if (value && typeof value === 'object' && !Array.isArray(value)) {
+                const entries = Object.entries(value);
+                if (entries.length > 0) {
+                    return entries.map(([name, val]) => ({
+                        name,
+                        value: typeof val === 'object' ? JSON.stringify(val) : String(val),
+                    }));
+                }
+            }
+            if (value !== undefined && value !== null) {
+                return [{ name: 'value', value: JSON.stringify(value) }];
+            }
+            return [];
+        }
+
+        function appendLog(message, type = 'info') {
+            if (editorLog.children.length === 1 && editorLog.children[0].textContent.includes('Logs will appear here')) {
+                editorLog.innerHTML = '';
+            }
+            const entry = document.createElement('div');
+            entry.className = `log-entry${type !== 'info' ? ' ' + type : ''}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            editorLog.appendChild(entry);
+            editorLog.scrollTop = editorLog.scrollHeight;
+        }
+
+        function renderEditorOutput({ status, raw, parsed, time, outputLabelsSuccess, outputLabelsError }) {
+            editorStatus.textContent = `Status: ${status}`;
+            editorRaw.textContent = raw;
+            editorResponseTime.textContent = `Response Time: ${time}`;
+            renderParsed(parsed);
+            renderOutputSections(outputLabelsSuccess || [], outputLabelsError || []);
+        }
+
+        editorTestButton.addEventListener('click', async () => {
+            const name = editorNameInput.value.trim() || 'Preview Server';
+            const address = editorAddressInput.value.trim();
+            const port = parseInt(editorPortInput.value, 10);
+            const protocol = editorProtocolInput.value;
+            const timeoutMs = parseInt(editorTimeoutInput.value, 10) || 5000;
+            const pseudoCode = pseudoCodeInput.value.trim();
+
+            if (!address) {
+                appendLog('Validation error: Server address required.', 'error');
+            renderEditorOutput({
+                status: 'Error: Server address required',
+                raw: defaultRawResponse,
+                parsed: defaultParsedValues,
+                time: '--',
+                outputLabelsSuccess: [],
+                outputLabelsError: [],
+            });
+                return;
+            }
+
+            if (!(port > 0 && port <= 65535)) {
+                appendLog('Validation error: Port must be between 1 and 65535.', 'error');
+            renderEditorOutput({
+                status: 'Error: Provide a valid port (1-65535)',
+                raw: defaultRawResponse,
+                parsed: defaultParsedValues,
+                time: '--',
+                outputLabelsSuccess: [],
+                outputLabelsError: [],
+            });
+                return;
+            }
+
+            if (!pseudoCode) {
+                appendLog('Validation error: Pseudo-code is required.', 'error');
+            renderEditorOutput({
+                status: 'Error: Pseudo-code is required for testing',
+                raw: defaultRawResponse,
+                parsed: defaultParsedValues,
+                time: '--',
+                outputLabelsSuccess: [],
+                outputLabelsError: [],
+            });
+                return;
+            }
+
+            renderEditorOutput({
+                status: 'Running test...',
+                raw: defaultRawResponse,
+                parsed: defaultParsedValues,
+                time: '--',
+                outputLabelsSuccess: [],
+                outputLabelsError: [],
+            });
+            appendLog(`Starting test for ${address}:${port}`);
+            appendLog(`Pseudo-code payload:\n${pseudoCode}`);
+
+            try {
+                const response = await fetch('/api/gameservers/test', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name,
+                        address,
+                        port,
+                        protocol,
+                        timeout_ms: timeoutMs,
+                        pseudo_code: pseudoCode,
+                    }),
+                });
+
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error?.message || result.error || 'Failed to run test');
+                }
+
+                const status = result.success
+                    ? '✅ Server response received'
+                    : `❌ ${result.error?.message || 'Validation failed'}`;
+                const parsed = formatParsedValues(result.parsed_values);
+                renderEditorOutput({
+                    status,
+                    raw: result.raw_response ?? 'No response recorded',
+                    parsed: parsed.length ? parsed : defaultParsedValues,
+                    time: typeof result.response_time_ms === 'number' ? `${result.response_time_ms} ms` : '--',
+                    outputLabelsSuccess: result.output_labels_success || [],
+                    outputLabelsError: result.output_labels_error || [],
+                });
+                const successType = result.success ? 'success' : 'error';
+                appendLog(`Test result: ${status}`, successType);
+            } catch (error) {
+                renderEditorOutput({
+                    status: `Error: ${error.message}`,
+                    raw: defaultRawResponse,
+                    parsed: defaultParsedValues,
+                    time: '--',
+                    outputLabelsSuccess: [],
+                    outputLabelsError: [],
+                });
+                appendLog(`Test failed: ${error.message}`, 'error');
+            }
+        });
+
+        editorSaveButton.addEventListener('click', async () => {
+            const name = editorNameInput.value.trim();
+            const address = editorAddressInput.value.trim();
+            const port = parseInt(editorPortInput.value, 10);
+            const protocol = editorProtocolInput.value;
+            const timeoutMs = parseInt(editorTimeoutInput.value, 10) || 5000;
+            const pseudoCode = pseudoCodeInput.value.trim();
+
+            if (!name) {
+                appendLog('Validation error: Server name is required.', 'error');
+                return;
+            }
+
+            if (!address) {
+                appendLog('Validation error: Server address is required.', 'error');
+                return;
+            }
+
+            if (!(port > 0 && port <= 65535)) {
+                appendLog('Validation error: Port must be between 1 and 65535.', 'error');
+                return;
+            }
+
+            if (!pseudoCode) {
+                appendLog('Validation error: Pseudo-code is required.', 'error');
+                return;
+            }
+
+            appendLog(`Saving game server: ${name}`);
+
+            try {
+                const response = await fetch('/api/gameservers', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name,
+                        address,
+                        port,
+                        protocol,
+                        timeout_ms: timeoutMs,
+                        pseudo_code: pseudoCode,
+                    }),
+                });
+
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || 'Failed to save game server');
+                }
+
+                appendLog(`Game server "${name}" saved successfully!`, 'success');
+                renderEditorOutput({
+                    status: `✅ Game server "${name}" saved successfully!`,
+                    raw: editorRaw.textContent,
+                    parsed: formatParsedValues({}),
+                    time: editorResponseTime.textContent,
+                    outputLabelsSuccess: [],
+                    outputLabelsError: [],
+                });
+            } catch (error) {
+                appendLog(`Failed to save game server: ${error.message}`, 'error');
+                renderEditorOutput({
+                    status: `Error: ${error.message}`,
+                    raw: editorRaw.textContent,
+                    parsed: defaultParsedValues,
+                    time: editorResponseTime.textContent,
+                    outputLabelsSuccess: [],
+                    outputLabelsError: [],
+                });
+            }
+        });
+
+        editorClearButton.addEventListener('click', () => {
+            pseudoCodeInput.value = defaultPseudoCode;
+            renderEditorOutput({
+                status: 'Editor reset',
+                raw: defaultRawResponse,
+                parsed: defaultParsedValues,
+                time: '--',
+                outputLabelsSuccess: [],
+                outputLabelsError: [],
+            });
+        });
+
+        renderEditorOutput({
+            status: 'Ready to test your script',
+            raw: defaultRawResponse,
+            parsed: defaultParsedValues,
+            time: '--',
+            outputLabelsSuccess: [],
+            outputLabelsError: [],
+        });
+
+        function renderOutputSections(successLabels, errorLabels) {
+            renderSection(editorOutputSuccess, successLabels, 'Output labels will appear here once the test finishes.');
+            renderSection(editorOutputError, errorLabels, 'Error labels will appear here if the test fails.');
+        }
+
+        function renderSection(container, labels, emptyText) {
+            if (!container) return;
+            if (labels.length === 0) {
+                container.textContent = emptyText;
+            } else {
+                container.innerHTML = labels.map(label => `<div>${label}</div>`).join('');
+            }
+        }
+    </script>
+</body>
+</html>
+
