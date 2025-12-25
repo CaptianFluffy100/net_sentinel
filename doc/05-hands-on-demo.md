@@ -59,7 +59,7 @@ PACKET_END
 - `WRITE_BYTE 0` - First null terminator (RCON requires two null bytes)
 - `WRITE_BYTE 0` - Second null terminator
 
-**Note:** Replace `<CODE>` with your actual RCON password. The `WRITE_STRING_LEN` ensures it's exactly 32 bytes.
+**Note:** Replace `<CODE>` with your actual RCON password, and `<CODE_LEN>` with RCON password length. The `WRITE_STRING_LEN` ensures it's exactly X bytes.
 
 ### Step 2: Parse Authentication Response
 
