@@ -1,3 +1,7 @@
+This project is licensed under the GNU General Public License v3.0 (GPLv3).
+See the LICENSE file for details.
+
+
 # Net Sentinel
 
 A network monitoring service built with Rust and Axum that tracks ISP connectivity, website availability, and game server status using custom pseudo-code scripts.
