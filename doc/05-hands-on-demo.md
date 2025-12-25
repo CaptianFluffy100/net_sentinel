@@ -55,7 +55,7 @@ PACKET_END
 - `WRITE_INT PACKET_LEN` - Auto-calculates the total packet length (excluding this field)
 - `WRITE_INT 1` - Request ID (can be any number, used to match responses)
 - `WRITE_INT 3` - Type: `3` means "SERVERDATA_AUTH" (authentication request)
-- `WRITE_STRING_LEN "<CODE>" 32` - Your RCON password, fixed to 32 bytes (padded with nulls)
+- `WRITE_STRING_LEN "<CODE>" <CODE_LEN>` - Your RCON password, and password length
 - `WRITE_BYTE 0` - First null terminator (RCON requires two null bytes)
 - `WRITE_BYTE 0` - Second null terminator
 
