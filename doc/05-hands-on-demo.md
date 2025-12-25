@@ -1,8 +1,9 @@
-# Hands-On Demo: RCON and Minecraft Ping
+# Hands-On Demo: RCON, Minecraft, and Source Engine
 
-This guide walks you through two complete, real-world examples:
+This guide walks you through three complete, real-world examples:
 1. **RCON with TabTPS** - Querying server performance metrics via RCON
 2. **Minecraft Status Ping** - Getting server status using Minecraft's protocol
+3. **Source Engine Query (Valheim)** - Querying Valheim and other Source Engine game servers
 
 We'll build each script step-by-step, explaining every command and how it works.
 
@@ -10,8 +11,9 @@ We'll build each script step-by-step, explaining every command and how it works.
 
 1. [RCON with TabTPS Demo](#rcon-with-tabtps-demo)
 2. [Minecraft Ping Demo](#minecraft-ping-demo)
-3. [Testing Your Scripts](#testing-your-scripts)
-4. [Troubleshooting](#troubleshooting)
+3. [Source Engine Query Demo](#source-engine-query-demo)
+4. [Testing Your Scripts](#testing-your-scripts)
+5. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -732,6 +734,341 @@ OUTPUT_END
 
 ---
 
+## Source Engine Query Demo (Valheim)
+
+This example shows how to:
+- Send a challenge request to a Source Engine server
+- Receive and extract the challenge value
+- Send a query with the challenge
+- Parse server information (name, map, players, etc.)
+
+**Note:** This protocol is used by Valheim and other Source Engine-based games. The example works for Valheim servers!
+
+### Understanding the Protocol
+
+**Source Engine Protocol:**
+- Uses UDP connection
+- Requires a challenge-response mechanism to prevent DDoS attacks
+- Two-step process: Challenge Request → Query Request
+- Magic bytes: `0xFFFFFFFF` (4 bytes)
+- Integers and shorts are little-endian (network byte order)
+
+**Protocol Flow:**
+1. **Challenge Request:** Send magic bytes + query type to get a challenge number
+2. **Challenge Response:** Receive magic bytes + challenge number
+3. **Query Request:** Send magic bytes + query type + challenge number
+4. **Query Response:** Receive server information
+
+**Games using Source Engine Query Protocol:**
+- **Valheim** (uses this protocol!)
+- Counter-Strike: Source
+- Counter-Strike: Global Offensive
+- Team Fortress 2
+- Left 4 Dead
+- Left 4 Dead 2
+- Half-Life 2: Deathmatch
+- And many more
+
+### Step 1: Challenge Request Packet
+
+First, we need to request a challenge from the server.
+
+```pseudo
+PACKET_START
+WRITE_INT 0xFFFFFFFF
+WRITE_BYTE 0x54
+WRITE_STRING "Source Engine Query"
+PACKET_END
+```
+
+**Breaking it down:**
+
+1. **`WRITE_INT 0xFFFFFFFF`**
+   - Magic bytes: `0xFFFFFFFF` (4 bytes)
+   - This identifies the packet as a Source Engine query
+   - Note: `WRITE_INT` is little-endian by default, but `0xFFFFFFFF` is the same value in both endianness, so it works correctly
+
+2. **`WRITE_BYTE 0x54`**
+   - Query type: `0x54` = `'T'` in ASCII
+   - This is the challenge request type
+
+3. **`WRITE_STRING "Source Engine Query"`**
+   - Query string (null-terminated)
+   - This is the standard query string for Source Engine
+
+**What happens:**
+- Server receives challenge request
+- Server generates a random challenge number
+- Server responds with the challenge
+
+### Step 2: Parse Challenge Response
+
+The server responds with a challenge number we need to use in the next request.
+
+```pseudo
+RESPONSE_START
+EXPECT_MAGIC 0xFFFFFFFF
+READ_BYTE response_type
+READ_INT challenge
+RESPONSE_END
+```
+
+**Breaking it down:**
+
+1. **`EXPECT_MAGIC 0xFFFFFFFF`**
+   - Validates the response starts with magic bytes
+   - Raises an error if they don't match
+
+2. **`READ_BYTE response_type`**
+   - Response type (should be `0x41` = `'A'` for challenge response)
+   - We read it but may not need to validate it
+
+3. **`READ_INT challenge`**
+   - The challenge number (4 bytes, little-endian)
+   - **This is critical** - we'll use this in the next packet
+   - Store this value - it will be needed for the query request
+
+**What you'll get:**
+- `challenge` variable contains a 32-bit integer (e.g., `1234567890`)
+- This challenge must be included in the query request
+
+### Step 3: Query Request Packet
+
+Now we send the actual query with the challenge number.
+
+```pseudo
+PACKET_START
+WRITE_INT 0xFFFFFFFF
+WRITE_BYTE 0x54
+WRITE_STRING "Source Engine Query"
+WRITE_INT challenge
+PACKET_END
+```
+
+**Breaking it down:**
+
+1. **`WRITE_INT 0xFFFFFFFF`**
+   - Magic bytes (same as before)
+
+2. **`WRITE_BYTE 0x54`**
+   - Query type: `'T'` (same as challenge request)
+
+3. **`WRITE_STRING "Source Engine Query"`**
+   - Query string (same as before)
+
+4. **`WRITE_INT challenge`**
+   - **The challenge number from step 2**
+   - This proves we received the challenge response
+   - Server will only respond if this matches
+
+**Why the challenge?**
+- Prevents DDoS attacks by requiring clients to complete a challenge-response
+- Server can rate-limit challenge requests separately from queries
+- Ensures the client is legitimate
+
+### Step 4: Parse Query Response
+
+The server responds with detailed server information.
+
+```pseudo
+RESPONSE_START
+EXPECT_MAGIC 0xFFFFFFFF
+READ_BYTE response_type
+READ_BYTE protocol
+READ_STRING_NULL server_name
+READ_STRING_NULL map_name
+READ_STRING_NULL folder
+READ_STRING_NULL game
+READ_SHORT app_id
+READ_BYTE players
+READ_BYTE max_players
+READ_BYTE bots
+READ_BYTE server_type
+READ_BYTE environment
+READ_BYTE visibility
+READ_BYTE vac
+READ_STRING_NULL version
+RESPONSE_END
+```
+
+**Breaking it down:**
+
+1. **`EXPECT_MAGIC 0xFFFFFFFF`**
+   - Validates response starts with magic bytes
+
+2. **`READ_BYTE response_type`**
+   - Response type (should be `0x49` = `'I'` for info response)
+
+3. **`READ_BYTE protocol`**
+   - Protocol version number
+
+4. **`READ_STRING_NULL server_name`**
+   - Server name (null-terminated string)
+
+5. **`READ_STRING_NULL map_name`**
+   - Current map name
+
+6. **`READ_STRING_NULL folder`**
+   - Game folder (e.g., "cstrike", "tf", "left4dead")
+
+7. **`READ_STRING_NULL game`**
+   - Game name (e.g., "Counter-Strike: Source")
+
+8. **`READ_SHORT app_id`**
+   - Steam App ID (2 bytes, little-endian)
+
+9. **`READ_BYTE players`**
+   - Current player count
+
+10. **`READ_BYTE max_players`**
+    - Maximum players
+
+11. **`READ_BYTE bots`**
+    - Bot count
+
+12. **`READ_BYTE server_type`**
+    - Server type: `'d'` = dedicated, `'l'` = listen
+
+13. **`READ_BYTE environment`**
+    - Environment: `'w'` = Windows, `'l'` = Linux
+
+14. **`READ_BYTE visibility`**
+    - Visibility: `0` = public, `1` = private
+
+15. **`READ_BYTE vac`**
+    - VAC secured: `0` = no, `1` = yes
+
+16. **`READ_STRING_NULL version`**
+    - Server version string
+
+**What you'll get:**
+All these values are stored as variables and can be used in output formatting.
+
+### Step 5: Format Output
+
+```pseudo
+OUTPUT_SUCCESS
+RETURN "server_name_out=server_name, map_name_out=map_name, folder_out=folder, game_out=game, app_id_out=app_id, players_out=players, max_players_out=max_players, bots_out=bots, server_type_out=server_type, environment_out=environment, visibility_out=visibility, vac_out=vac, version_out=version"
+OUTPUT_END
+
+OUTPUT_ERROR
+RETURN "server=HOST, error=ERROR"
+OUTPUT_END
+```
+
+**Breaking it down:**
+
+- **Success output:** Returns all extracted server information as key-value pairs
+- **Error output:** Returns error information if something goes wrong
+
+**Final output format:**
+```
+server_name_out=My CS:GO Server, map_name_out=de_dust2, folder_out=csgo, game_out=Counter-Strike: Global Offensive, app_id_out=730, players_out=12, max_players_out=24, bots_out=0, server_type_out=100, environment_out=119, visibility_out=0, vac_out=1, version_out=1.38.4.5
+```
+
+### Complete Source Engine Script
+
+Here's the complete script:
+
+```pseudo
+PACKET_START
+WRITE_INT 0xFFFFFFFF
+WRITE_BYTE 0x54
+WRITE_STRING "Source Engine Query"
+PACKET_END
+
+RESPONSE_START
+EXPECT_MAGIC 0xFFFFFFFF
+READ_BYTE response_type
+READ_INT challenge
+RESPONSE_END
+
+PACKET_START
+WRITE_INT 0xFFFFFFFF
+WRITE_BYTE 0x54
+WRITE_STRING "Source Engine Query"
+WRITE_INT challenge
+PACKET_END
+
+RESPONSE_START
+EXPECT_MAGIC 0xFFFFFFFF
+READ_BYTE response_type
+READ_BYTE protocol
+READ_STRING_NULL server_name
+READ_STRING_NULL map_name
+READ_STRING_NULL folder
+READ_STRING_NULL game
+READ_SHORT app_id
+READ_BYTE players
+READ_BYTE max_players
+READ_BYTE bots
+READ_BYTE server_type
+READ_BYTE environment
+READ_BYTE visibility
+READ_BYTE vac
+READ_STRING_NULL version
+RESPONSE_END
+
+OUTPUT_SUCCESS
+RETURN "server_name_out=server_name, map_name_out=map_name, folder_out=folder, game_out=game, app_id_out=app_id, players_out=players, max_players_out=max_players, bots_out=bots, server_type_out=server_type, environment_out=environment, visibility_out=visibility, vac_out=vac, version_out=version"
+OUTPUT_END
+
+OUTPUT_ERROR
+RETURN "server=HOST, error=ERROR"
+OUTPUT_END
+```
+
+### Key Points
+
+1. **Challenge-Response Pattern:**
+   - Always request challenge first
+   - Use the challenge in the query request
+   - Server validates the challenge before responding
+   - Challenge must be used immediately (don't delay between packets)
+
+2. **Magic Bytes:**
+   - Always `0xFFFFFFFF` at the start of packets
+   - Use `EXPECT_MAGIC` to validate responses
+   - Magic bytes appear in both requests and responses
+
+3. **Endianness:**
+   - Integers are little-endian (default)
+   - Shorts are little-endian (default)
+   - Magic bytes (`0xFFFFFFFF`) work the same in both endianness
+
+4. **Null-Terminated Strings:**
+   - All strings are null-terminated
+   - Use `READ_STRING_NULL` to read them (reads until `0x00`)
+   - Use `WRITE_STRING` to write them (auto-adds null terminator)
+
+5. **Byte Values:**
+   - Server type: `'d'` (100) = dedicated, `'l'` (108) = listen
+   - Environment: `'w'` (119) = Windows, `'l'` (108) = Linux
+   - Visibility: `0` = public, `1` = private
+   - VAC: `0` = no, `1` = yes (Valheim typically returns `0`)
+
+### Valheim-Specific Notes
+
+- **Port:** Default query port is `2457` (UDP)
+- **Folder:** Typically `valheim`
+- **Game:** Usually `valheim`
+- **App ID:** Varies, but commonly used for Valheim
+- **VAC:** Usually `0` (Valheim doesn't use VAC)
+
+### Common Source Engine Games
+
+| Game | Folder | App ID | Notes |
+|------|--------|--------|-------|
+| **Valheim** | valheim | varies | Uses Source Engine query protocol |
+| Counter-Strike: Source | cstrike | 240 | |
+| Counter-Strike: Global Offensive | csgo | 730 | |
+| Team Fortress 2 | tf | 440 | |
+| Left 4 Dead | left4dead | 500 | |
+| Left 4 Dead 2 | left4dead2 | 550 | |
+| Half-Life 2: Deathmatch | hl2mp | 320 | |
+
+---
+
 ## Testing Your Scripts
 
 ### Testing RCON Script
@@ -769,6 +1106,27 @@ OUTPUT_END
    - Verify handshake succeeds
    - Check status request works
    - Confirm JSON is parsed correctly
+
+### Testing Source Engine Script
+
+1. **Set up your Source Engine server:**
+   - Ensure server is running
+   - Note server address and port
+   - Verify server allows query requests
+
+2. **Configure in Net Sentinel:**
+   - Protocol: `UDP`
+   - Address: Server IP or hostname
+   - Port: Server query port
+     - Valheim: `2457` (default UDP query port)
+     - Other Source Engine games: Usually the game port (e.g., 27015)
+
+3. **Test the script:**
+   - Use the test endpoint
+   - Verify challenge request succeeds
+   - Check challenge is received correctly
+   - Confirm query request with challenge works
+   - Verify all server information is parsed correctly
 
 ### Common Issues
 
@@ -822,6 +1180,29 @@ OUTPUT_END
   - Verify `READ_STRING_NULL` reads the complete JSON
   - Check JSON is valid (no truncation)
   - Ensure `JSON_OUTPUT` is called before accessing nested fields
+
+### Source Engine Issues
+
+**Problem: Challenge request times out**
+- **Solution:**
+  - Check server is online and accessible
+  - Verify port is correct (query port, not game port)
+  - Check firewall allows UDP packets
+  - Ensure server allows query requests (some servers disable them)
+
+**Problem: Query request fails after challenge**
+- **Solution:**
+  - Verify challenge value is correctly read
+  - Check challenge is included in query request
+  - Ensure challenge hasn't expired (use it immediately)
+  - Verify magic bytes are correct (`0xFFFFFFFF`)
+
+**Problem: Response parsing fails**
+- **Solution:**
+  - Check `EXPECT_MAGIC` validates correctly
+  - Verify response type matches expected (`0x49` for info)
+  - Ensure all strings are read with `READ_STRING_NULL`
+  - Check byte order (little-endian for integers/shorts)
 
 ### General Debugging Tips
 
