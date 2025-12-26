@@ -34,12 +34,14 @@ Welcome to the Net Sentinel documentation! This documentation explains how to wr
 ## 📖 What is Pseudo-Code?
 
 Pseudo-code is a simple scripting language that lets you describe:
-- **What packets to send** to a game server
+- **What packets to send** to a game server (TCP/UDP protocols)
+- **What HTTP requests to send** to REST APIs (HTTP/HTTPS protocols)
 - **How to parse the response** from the server
 - **How to format the output** for monitoring
 
 Instead of writing complex code, you write simple, readable instructions:
 
+**For TCP/UDP protocols:**
 ```pseudo
 PACKET_START
 WRITE_BYTE 0xFF
@@ -51,13 +53,27 @@ READ_STRING_NULL server_info
 RESPONSE_END
 ```
 
+**For HTTP/HTTPS protocols:**
+```pseudo
+HTTP_START REQUEST GET /api/status
+HTTP_END
+
+RESPONSE_START
+EXPECT_STATUS 200
+READ_BODY_JSON response
+RESPONSE_END
+```
+
 ## 🎯 Common Use Cases
 
 ### Monitor Game Server Status
 Check if a game server is online and get player count, version, etc.
 
+### Monitor REST APIs and Web Services
+Monitor HTTP/HTTPS endpoints, REST APIs, and web services using the same pseudo-code system.
+
 ### Custom Protocol Support
-Add support for any game server protocol without modifying code.
+Add support for any game server protocol or REST API without modifying code.
 
 ### Prometheus Metrics
 Export server status as Prometheus metrics for monitoring dashboards.
@@ -89,11 +105,13 @@ Export server status as Prometheus metrics for monitoring dashboards.
 
 ## 💡 Key Concepts
 
-### Packets
-A packet is a sequence of bytes sent to a server. You construct packets using `WRITE_*` commands.
+### Packets and HTTP Requests
+- **Packets** (TCP/UDP): A sequence of bytes sent to a server. You construct packets using `WRITE_*` commands.
+- **HTTP Requests** (HTTP/HTTPS): Proper HTTP requests with methods, headers, and bodies. You construct requests using `HTTP_START`, `HEADER`, `PARAM`, and `DATA` commands.
 
 ### Responses
-Servers respond with bytes. You parse responses using `READ_*` commands.
+- **Binary responses** (TCP/UDP): Servers respond with bytes. You parse responses using `READ_*` commands.
+- **HTTP responses** (HTTP/HTTPS): Servers respond with status codes, headers, and bodies. You parse responses using `EXPECT_STATUS`, `EXPECT_HEADER`, `READ_BODY_JSON`, and `READ_BODY` commands.
 
 ### Variables
 Values extracted from responses are stored as variables. You can use variables in output formatting.

@@ -33,6 +33,8 @@ pub struct CreateWebsite {
 pub enum Protocol {
     Udp,
     Tcp,
+    Http,
+    Https,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

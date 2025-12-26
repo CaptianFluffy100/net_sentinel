@@ -30,6 +30,11 @@ pub enum ResponseCommand {
     ExpectByte(u8),
     ExpectMagic(Vec<u8>),
     ReadVarInt(String),
+    // HTTP-specific response commands
+    ExpectStatus(u16),
+    ExpectHeader { key: String, value: String },
+    ReadBodyJson(String),
+    ReadBody(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,13 +140,49 @@ pub enum Condition {
 }
 
 #[derive(Debug, Clone)]
+pub enum HttpMethod {
+    Get,
+    Post,
+    Put,
+    Delete,
+    Custom(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum HttpBodyType {
+    Form,
+    Raw,
+}
+
+#[derive(Debug, Clone)]
+pub enum HttpCommand {
+    HttpStart { method: HttpMethod, path: String },
+    Param { key: String, value: String },
+    Header { key: String, value: String },
+    BodyStart { body_type: HttpBodyType },
+    Data { content: String },
+    BodyEnd,
+}
+
+#[derive(Debug, Clone)]
+pub struct HttpRequest {
+    pub method: HttpMethod,
+    pub path: String,
+    pub params: Vec<(String, String)>,
+    pub headers: Vec<(String, String)>,
+    pub body_type: Option<HttpBodyType>,
+    pub body_data: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct CodeBlock {
     pub commands: Vec<CodeCommand>,
 }
 
 #[derive(Debug, Clone)]
 pub struct PacketResponsePair {
-    pub packets: Vec<Vec<PacketCommand>>, // Multiple packets to send before waiting for response
+    pub packets: Vec<Vec<PacketCommand>>, // Binary packets (empty if HTTP request is used)
+    pub http_request: Option<HttpRequest>, // HTTP request (None if binary packets are used)
     pub response: Vec<ResponseCommand>,
     pub close_connection_before: bool, // If true, close connection before this pair
 }
@@ -159,12 +200,15 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
     let mut pairs = Vec::new();
     let mut current_packets = Vec::new(); // Accumulate multiple packets
     let mut current_packet = Vec::new(); // Current packet being built
+    let mut current_http_request: Option<HttpRequest> = None; // Current HTTP request being built
+    let mut current_http_commands = Vec::new(); // HTTP commands for current request
     let mut current_response = Vec::new();
     let mut output_blocks = Vec::new();
     let mut current_output: Option<OutputBlock> = None;
     let mut code_blocks = Vec::new();
     let mut current_code = Vec::new();
     let mut in_packet = false;
+    let mut in_http = false;
     let mut in_response = false;
     let mut in_code = false;
     let mut close_connection_before_next = false; // Track if CONNECTION_CLOSE was seen
@@ -197,6 +241,65 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
             continue;
         }
 
+        // HTTP section
+        if line.starts_with("HTTP_START REQUEST ") {
+            println!("[PARSER] Line {}: Entering HTTP_START section", line_num + 1);
+            
+            // Parse HTTP_START REQUEST <METHOD> <PATH>
+            let rest = line.strip_prefix("HTTP_START REQUEST ").unwrap();
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            if parts.len() < 2 {
+                anyhow::bail!("HTTP_START REQUEST requires method and path at line {}", line_num + 1);
+            }
+            
+            let method_str = parts[0].to_uppercase();
+            let method = match method_str.as_str() {
+                "GET" => HttpMethod::Get,
+                "POST" => HttpMethod::Post,
+                "PUT" => HttpMethod::Put,
+                "DELETE" => HttpMethod::Delete,
+                _ => {
+                    // Check if it's "Custom <method> <path>" format
+                    if method_str == "CUSTOM" && parts.len() >= 3 {
+                        HttpMethod::Custom(parts[1].to_string())
+                    } else {
+                        HttpMethod::Custom(parts[0].to_string())
+                    }
+                },
+            };
+            let path = if method_str == "CUSTOM" && parts.len() >= 3 {
+                parts[2].to_string()
+            } else {
+                parts[1].to_string()
+            };
+            
+            current_http_request = Some(HttpRequest {
+                method,
+                path,
+                params: Vec::new(),
+                headers: Vec::new(),
+                body_type: None,
+                body_data: Vec::new(),
+            });
+            current_http_commands.clear();
+            in_http = true;
+            in_packet = false;
+            in_response = false;
+            line_num += 1;
+            continue;
+        }
+        if line == "HTTP_END" {
+            println!("[PARSER] Line {}: Exiting HTTP section", line_num + 1);
+            // Build the HTTP request from accumulated commands
+            if let Some(mut http_req) = current_http_request.take() {
+                http_req = build_http_request_from_commands(http_req, &current_http_commands)?;
+                current_http_request = Some(http_req);
+            }
+            in_http = false;
+            line_num += 1;
+            continue;
+        }
+        
         // Packet section
         if line == "PACKET_START" {
             println!("[PARSER] Line {}: Entering PACKET_START section", line_num + 1);
@@ -213,6 +316,7 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
                 println!("[PARSER] This PACKET_START will close connection before sending");
             }
             in_packet = true;
+            in_http = false;
             in_response = false;
             line_num += 1;
             continue;
@@ -241,24 +345,39 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
         }
         if line == "RESPONSE_END" {
             println!("[PARSER] Line {}: Exiting RESPONSE section (found {} commands)", line_num + 1, current_response.len());
-            // When response ends, save all accumulated packets with the response
+            // When response ends, save all accumulated packets or HTTP request with the response
+            let should_close = close_connection_before_next;
+            close_connection_before_next = false; // Reset flag
+            
             if !current_packets.is_empty() {
                 println!("[PARSER] Saving packet/response pair ({} packet(s), response: {} commands)", 
                          current_packets.len(), current_response.len());
-                // Check if this pair should close connection before it
-                let should_close = close_connection_before_next;
-                close_connection_before_next = false; // Reset flag
                 if should_close {
                     println!("[PARSER] This pair will close connection before sending");
                 }
                 pairs.push(PacketResponsePair {
                     packets: current_packets.clone(),
+                    http_request: None,
                     response: current_response.clone(),
                     close_connection_before: should_close,
                 });
                 current_packets.clear();
-                current_response.clear();
+            } else if current_http_request.is_some() {
+                let mut http_req = current_http_request.take().unwrap();
+                http_req = build_http_request_from_commands(http_req, &current_http_commands)?;
+                println!("[PARSER] Saving HTTP request/response pair (response: {} commands)", current_response.len());
+                if should_close {
+                    println!("[PARSER] This pair will close connection before sending");
+                }
+                pairs.push(PacketResponsePair {
+                    packets: Vec::new(),
+                    http_request: Some(http_req),
+                    response: current_response.clone(),
+                    close_connection_before: should_close,
+                });
+                current_http_commands.clear();
             }
+            current_response.clear();
             in_response = false;
             line_num += 1;
             continue;
@@ -293,7 +412,12 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
             continue;
         }
 
-        if in_packet {
+        if in_http {
+            println!("[PARSER] Line {}: Parsing HTTP command: {}", line_num + 1, line);
+            let cmd = parse_http_command(line, line_num + 1)?;
+            current_http_commands.push(cmd);
+            line_num += 1;
+        } else if in_packet {
             println!("[PARSER] Line {}: Parsing packet command: {}", line_num + 1, line);
             current_packet.push(parse_packet_command(line, line_num + 1)?);
             line_num += 1;
@@ -333,6 +457,17 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
                  current_packets.len(), current_response.len());
         pairs.push(PacketResponsePair {
             packets: current_packets,
+            http_request: None,
+            response: current_response,
+            close_connection_before: close_connection_before_next,
+        });
+    } else if current_http_request.is_some() {
+        let mut http_req = current_http_request.take().unwrap();
+        http_req = build_http_request_from_commands(http_req, &current_http_commands)?;
+        println!("[PARSER] Saving final HTTP request/response pair (response: {} commands)", current_response.len());
+        pairs.push(PacketResponsePair {
+            packets: Vec::new(),
+            http_request: Some(http_req),
             response: current_response,
             close_connection_before: close_connection_before_next,
         });
@@ -570,8 +705,114 @@ fn parse_response_command(line: &str, line_num: usize) -> Result<ResponseCommand
                 .with_context(|| format!("Invalid hex string at line {}", line_num))?;
             Ok(ResponseCommand::ExpectMagic(bytes))
         }
+        "EXPECT_STATUS" => {
+            let status_code: u16 = parts.get(1)
+                .ok_or_else(|| anyhow::anyhow!("EXPECT_STATUS requires status code at line {}", line_num))?
+                .parse()
+                .with_context(|| format!("Invalid status code at line {}", line_num))?;
+            Ok(ResponseCommand::ExpectStatus(status_code))
+        }
+        "EXPECT_HEADER" => {
+            if parts.len() < 3 {
+                anyhow::bail!("EXPECT_HEADER requires header key and value at line {}", line_num);
+            }
+            let key = parts[1].to_string();
+            let value = parts[2..].join(" "); // Handle values with spaces
+            Ok(ResponseCommand::ExpectHeader { key, value })
+        }
+        "READ_BODY_JSON" => {
+            let var = parts.get(1)
+                .ok_or_else(|| anyhow::anyhow!("READ_BODY_JSON requires variable name at line {}", line_num))?;
+            Ok(ResponseCommand::ReadBodyJson(var.to_string()))
+        }
+        "READ_BODY" => {
+            let var = parts.get(1)
+                .ok_or_else(|| anyhow::anyhow!("READ_BODY requires variable name at line {}", line_num))?;
+            Ok(ResponseCommand::ReadBody(var.to_string()))
+        }
         _ => anyhow::bail!("Unknown response command: {} at line {}", parts[0], line_num),
     }
+}
+
+fn parse_http_command(line: &str, line_num: usize) -> Result<HttpCommand> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.is_empty() {
+        anyhow::bail!("Empty HTTP command at line {}", line_num);
+    }
+
+    match parts[0] {
+        "PARAM" => {
+            if parts.len() < 3 {
+                anyhow::bail!("PARAM requires key and value at line {}", line_num);
+            }
+            let key = parts[1].to_string();
+            let value = parts[2..].join(" "); // Handle values with spaces
+            Ok(HttpCommand::Param { key, value })
+        }
+        "HEADER" => {
+            if parts.len() < 3 {
+                anyhow::bail!("HEADER requires key and value at line {}", line_num);
+            }
+            let key = parts[1].to_string();
+            let value = parts[2..].join(" "); // Handle values with spaces
+            Ok(HttpCommand::Header { key, value })
+        }
+        "BODY_START" => {
+            if parts.len() < 3 || parts[1] != "TYPE" {
+                anyhow::bail!("BODY_START requires TYPE and body type (FORM or RAW) at line {}", line_num);
+            }
+            let body_type_str = parts[2].to_uppercase();
+            let body_type = match body_type_str.as_str() {
+                "FORM" => HttpBodyType::Form,
+                "RAW" => HttpBodyType::Raw,
+                _ => anyhow::bail!("BODY_START TYPE must be FORM or RAW at line {}", line_num),
+            };
+            Ok(HttpCommand::BodyStart { body_type })
+        }
+        "DATA" => {
+            // DATA content can span the rest of the line, and may include JSON or other content
+            // For JSON, we need to handle multiline JSON objects. For now, handle single line.
+            // The content is the rest of the line after "DATA "
+            if parts.len() < 2 {
+                anyhow::bail!("DATA requires content at line {}", line_num);
+            }
+            let content = parts[1..].join(" "); // Join all remaining parts
+            Ok(HttpCommand::Data { content })
+        }
+        "BODY_END" => {
+            Ok(HttpCommand::BodyEnd)
+        }
+        _ => anyhow::bail!("Unknown HTTP command: {} at line {}", parts[0], line_num),
+    }
+}
+
+fn build_http_request_from_commands(
+    mut request: HttpRequest,
+    commands: &[HttpCommand],
+) -> Result<HttpRequest> {
+    for cmd in commands {
+        match cmd {
+            HttpCommand::Param { key, value } => {
+                request.params.push((key.clone(), value.clone()));
+            }
+            HttpCommand::Header { key, value } => {
+                request.headers.push((key.clone(), value.clone()));
+            }
+            HttpCommand::BodyStart { body_type } => {
+                request.body_type = Some(body_type.clone());
+            }
+            HttpCommand::Data { content } => {
+                request.body_data.push(content.clone());
+            }
+            HttpCommand::BodyEnd => {
+                // No-op, just marks the end
+            }
+            HttpCommand::HttpStart { .. } => {
+                // Already handled
+            }
+        }
+    }
+    Ok(request)
 }
 
 fn handle_output_line(
@@ -1673,6 +1914,18 @@ pub fn parse_response(
                 }
                 cursor += expected.len();
             }
+            ResponseCommand::ExpectStatus(_) => {
+                anyhow::bail!("EXPECT_STATUS is only valid for HTTP responses, not binary responses");
+            }
+            ResponseCommand::ExpectHeader { .. } => {
+                anyhow::bail!("EXPECT_HEADER is only valid for HTTP responses, not binary responses");
+            }
+            ResponseCommand::ReadBodyJson(_) => {
+                anyhow::bail!("READ_BODY_JSON is only valid for HTTP responses, not binary responses");
+            }
+            ResponseCommand::ReadBody(_) => {
+                anyhow::bail!("READ_BODY is only valid for HTTP responses, not binary responses");
+            }
         }
         println!("[PARSE] Cursor position after command {}: {} / {}", idx + 1, cursor, response.len());
     }
@@ -1984,5 +2237,175 @@ fn read_varint(response: &[u8], cursor: &mut usize) -> Result<u64> {
             anyhow::bail!("VarInt too large");
         }
     }
+}
+
+/// HTTP request data prepared for sending
+#[derive(Debug, Clone)]
+pub struct PreparedHttpRequest {
+    pub method: String,
+    pub path: String,
+    pub params: Vec<(String, String)>,
+    pub headers: Vec<(String, String)>,
+    pub body: Option<(String, Vec<u8>)>, // (content_type, body_bytes)
+}
+
+/// Prepare HTTP request from HttpRequest struct, substituting variables
+pub fn prepare_http_request_with_vars(
+    http_req: &HttpRequest,
+    vars: &IndexMap<String, JsonValue>,
+) -> Result<PreparedHttpRequest> {
+    // Resolve path (substitute variables)
+    let path = resolve_string_value(&http_req.path, vars)?;
+    
+    // Resolve params
+    let mut resolved_params = Vec::new();
+    for (key, value) in &http_req.params {
+        let resolved_key = resolve_string_value(key, vars)?;
+        let resolved_value = resolve_string_value(value, vars)?;
+        resolved_params.push((resolved_key, resolved_value));
+    }
+    
+    // Resolve headers
+    let mut resolved_headers = Vec::new();
+    for (key, value) in &http_req.headers {
+        let resolved_key = resolve_string_value(key, vars)?;
+        let resolved_value = resolve_string_value(value, vars)?;
+        resolved_headers.push((resolved_key, resolved_value));
+    }
+    
+    // Get HTTP method string
+    let method_str = match &http_req.method {
+        HttpMethod::Get => "GET".to_string(),
+        HttpMethod::Post => "POST".to_string(),
+        HttpMethod::Put => "PUT".to_string(),
+        HttpMethod::Delete => "DELETE".to_string(),
+        HttpMethod::Custom(m) => m.clone(),
+    };
+    
+    // Build body
+    let body = if let Some(body_type) = &http_req.body_type {
+        let content_type = match body_type {
+            HttpBodyType::Form => "application/x-www-form-urlencoded".to_string(),
+            HttpBodyType::Raw => {
+                // Check if Content-Type header is set, otherwise default to application/json
+                resolved_headers
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("Content-Type"))
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_else(|| "application/json".to_string())
+            }
+        };
+        
+        let body_bytes = match body_type {
+            HttpBodyType::Form => {
+                // Build form data from body_data (key=value pairs)
+                let form_parts: Vec<String> = http_req.body_data
+                    .iter()
+                    .map(|data| {
+                        // Each DATA entry might be "key=value" or just "value"
+                        // For form, we expect "key=value" format
+                        resolve_string_value(data, vars).unwrap_or_else(|_| data.clone())
+                    })
+                    .collect();
+                form_parts.join("&").into_bytes()
+            }
+            HttpBodyType::Raw => {
+                // Join all body data and try to parse as JSON, then stringify
+                // This allows users to write JSON directly
+                let combined = http_req.body_data.join("\n");
+                let resolved = resolve_string_value(&combined, vars)?;
+                
+                // Try to parse as JSON to validate and pretty-print, then convert back to string
+                // This handles the automatic JSON stringification mentioned in the spec
+                if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&resolved) {
+                    // Valid JSON - stringify it
+                    serde_json::to_string(&json_value)?.into_bytes()
+                } else {
+                    // Not valid JSON, use as-is
+                    resolved.into_bytes()
+                }
+            }
+        };
+        
+        Some((content_type, body_bytes))
+    } else {
+        None
+    };
+    
+    Ok(PreparedHttpRequest {
+        method: method_str,
+        path,
+        params: resolved_params,
+        headers: resolved_headers,
+        body,
+    })
+}
+
+/// Helper to resolve string values, substituting variables
+fn resolve_string_value(s: &str, vars: &IndexMap<String, JsonValue>) -> Result<String> {
+    // Simple variable substitution: if the string matches a variable name exactly, use it
+    // Otherwise, return as-is (future: could support embedded variables like "Bearer {token}")
+    if let Some(value) = vars.get(s) {
+        Ok(value.as_str().unwrap_or(&value.to_string()).to_string())
+    } else {
+        Ok(s.to_string())
+    }
+}
+
+/// Parse HTTP response using response commands
+pub fn parse_http_response(
+    response_commands: &[ResponseCommand],
+    status_code: u16,
+    headers: &reqwest::header::HeaderMap,
+    body: &[u8],
+) -> Result<IndexMap<String, serde_json::Value>> {
+    let mut vars = IndexMap::new();
+    
+    // Store status code as a variable
+    vars.insert("STATUS_CODE".to_string(), serde_json::json!(status_code));
+    
+    // Store headers as variables (HEADER_<Key>)
+    for (key, value) in headers.iter() {
+        let header_name = format!("HEADER_{}", key.as_str().replace("-", "_"));
+        if let Ok(value_str) = value.to_str() {
+            vars.insert(header_name, serde_json::json!(value_str));
+        }
+    }
+    
+    for cmd in response_commands {
+        match cmd {
+            ResponseCommand::ExpectStatus(expected) => {
+                if status_code != *expected {
+                    anyhow::bail!("Expected status code {}, got {}", expected, status_code);
+                }
+            }
+            ResponseCommand::ExpectHeader { key, value } => {
+                let header_value = headers
+                    .get(key)
+                    .and_then(|v| v.to_str().ok())
+                    .ok_or_else(|| anyhow::anyhow!("Header '{}' not found or invalid", key))?;
+                
+                if header_value != value.as_str() {
+                    anyhow::bail!("Expected header '{}' to be '{}', got '{}'", key, value, header_value);
+                }
+            }
+            ResponseCommand::ReadBodyJson(var_name) => {
+                let json_value: serde_json::Value = serde_json::from_slice(body)
+                    .context("Failed to parse response body as JSON")?;
+                vars.insert(var_name.clone(), json_value);
+            }
+            ResponseCommand::ReadBody(var_name) => {
+                let body_text = String::from_utf8(body.to_vec())
+                    .context("Failed to parse response body as UTF-8 text")?;
+                vars.insert(var_name.clone(), serde_json::json!(body_text));
+            }
+            _ => {
+                // Other commands are not valid for HTTP responses
+                anyhow::bail!("Command {:?} is not valid for HTTP responses", cmd);
+            }
+        }
+    }
+    
+    Ok(vars)
 }
 

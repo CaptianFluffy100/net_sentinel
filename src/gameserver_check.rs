@@ -1,5 +1,5 @@
 use crate::models::{GameServer, Protocol, GameServerTestResult, GameServerError};
-use crate::packet_parser::{build_packets_with_vars, parse_response, parse_script, execute_code_blocks, OutputBlock, OutputCommand, OutputStatus, PacketResponsePair};
+use crate::packet_parser::{build_packets_with_vars, parse_response, parse_script, execute_code_blocks, OutputBlock, OutputCommand, OutputStatus, PacketResponsePair, prepare_http_request_with_vars, parse_http_response};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use indexmap::IndexMap;
@@ -287,6 +287,175 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                 println!("[TCP] All pairs complete, closing connection");
             }
             // TCP parsing is done inline above
+        },
+        Protocol::Http | Protocol::Https => {
+            let is_https = server.protocol == Protocol::Https;
+            let scheme = if is_https { "https" } else { "http" };
+            let default_port = if is_https { 443 } else { 80 };
+            
+            // Build base URL - use IP only, add port only if non-default
+            let base_url = if server.port == default_port {
+                format!("{}://{}", scheme, server.address)
+            } else {
+                format!("{}://{}:{}", scheme, server.address, server.port)
+            };
+            
+            println!("[HTTP] Using base URL: {}", base_url);
+            
+            let client = match reqwest::Client::builder()
+                .timeout(std::time::Duration::from_millis(server.timeout_ms))
+                .danger_accept_invalid_certs(true) // Accept self-signed certs for HTTPS
+                .build() {
+                Ok(c) => c,
+                Err(e) => {
+                    last_error = Some(GameServerError {
+                        error_type: "NetworkError".to_string(),
+                        message: format!("Failed to create HTTP client: {}", e),
+                        line: None,
+                    });
+                    // Break out of match, will return error result
+                    return GameServerTestResult {
+                        success: false,
+                        response_time_ms: start.elapsed().as_millis() as u64,
+                        raw_response: None,
+                        parsed_values: serde_json::json!({}),
+                        variables: serde_json::json!({}),
+                        error: last_error,
+                        output_labels_success: Vec::new(),
+                        output_labels_error: Vec::new(),
+                    };
+                }
+            };
+            
+            for (pair_idx, pair) in script.pairs.iter().enumerate() {
+                println!("[CHECK] Executing pair {} of {}...", pair_idx + 1, script.pairs.len());
+                
+                // Check if this is an HTTP request or binary packets
+                if let Some(http_req) = &pair.http_request {
+                    // Build HTTP request with current variables
+                    println!("[BUILD] Preparing HTTP request for pair {} with {} variable(s)...", pair_idx + 1, all_parsed_vars.len());
+                    let prepared_req = match prepare_http_request_with_vars(http_req, &all_parsed_vars) {
+                        Ok(req) => req,
+                        Err(e) => {
+                            last_error = Some(GameServerError {
+                                error_type: "BuildError".to_string(),
+                                message: format!("Pair {}: {}", pair_idx + 1, e),
+                                line: None,
+                            });
+                            break;
+                        }
+                    };
+                    
+                    // Build full URL with path and query parameters
+                    let mut url = match reqwest::Url::parse(&format!("{}{}", base_url, prepared_req.path)) {
+                        Ok(u) => u,
+                        Err(e) => {
+                            last_error = Some(GameServerError {
+                                error_type: "BuildError".to_string(),
+                                message: format!("Pair {}: Failed to parse URL: {}", pair_idx + 1, e),
+                                line: None,
+                            });
+                            break;
+                        }
+                    };
+                    
+                    // Add query parameters
+                    if !prepared_req.params.is_empty() {
+                        let mut query_pairs = url.query_pairs_mut();
+                        for (k, v) in &prepared_req.params {
+                            query_pairs.append_pair(k, v);
+                        }
+                        drop(query_pairs); // Explicitly drop to apply changes
+                    }
+                    let url = url.to_string();
+                    
+                    println!("[HTTP] Sending {} request to {}", prepared_req.method, url);
+                    
+                    // Build request
+                    let request_builder = match prepared_req.method.as_str() {
+                        "GET" => client.get(&url),
+                        "POST" => client.post(&url),
+                        "PUT" => client.put(&url),
+                        "DELETE" => client.delete(&url),
+                        method => {
+                            // Custom method - use request()
+                            client.request(reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::GET), &url)
+                        }
+                    };
+                    
+                    // Add headers
+                    let mut request_builder = request_builder;
+                    for (key, value) in &prepared_req.headers {
+                        request_builder = request_builder.header(key, value);
+                    }
+                    
+                    // Add body if present
+                    let request_builder = if let Some((content_type, body_bytes)) = &prepared_req.body {
+                        request_builder
+                            .header("Content-Type", content_type)
+                            .body(body_bytes.clone())
+                    } else {
+                        request_builder
+                    };
+                    
+                    // Send request
+                    let response = match request_builder.send().await {
+                        Ok(resp) => resp,
+                        Err(e) => {
+                            last_error = Some(GameServerError {
+                                error_type: "NetworkError".to_string(),
+                                message: format!("Pair {}: HTTP request failed: {}", pair_idx + 1, e),
+                                line: None,
+                            });
+                            break;
+                        }
+                    };
+                    
+                    let status_code = response.status().as_u16();
+                    let headers = response.headers().clone();
+                    let body_bytes = match response.bytes().await {
+                        Ok(bytes) => bytes.to_vec(),
+                        Err(e) => {
+                            last_error = Some(GameServerError {
+                                error_type: "NetworkError".to_string(),
+                                message: format!("Pair {}: Failed to read response body: {}", pair_idx + 1, e),
+                                line: None,
+                            });
+                            break;
+                        }
+                    };
+                    
+                    all_responses.push(body_bytes.clone());
+                    
+                    // Parse HTTP response
+                    if !pair.response.is_empty() {
+                        println!("[CHECK] Parsing pair {} HTTP response with {} response commands...", pair_idx + 1, pair.response.len());
+                        match parse_http_response(&pair.response, status_code, &headers, &body_bytes) {
+                            Ok(vars) => {
+                                println!("[CHECK] Pair {} response parsing successful: {} variables extracted", pair_idx + 1, vars.len());
+                                all_parsed_vars.extend(vars);
+                            }
+                            Err(e) => {
+                                println!("[CHECK] Pair {} response parsing failed: {}", pair_idx + 1, e);
+                                last_error = Some(GameServerError {
+                                    error_type: "ParseError".to_string(),
+                                    message: format!("Pair {}: {}", pair_idx + 1, e),
+                                    line: None,
+                                });
+                                break;
+                            }
+                        }
+                    }
+                } else if !pair.packets.is_empty() {
+                    // Binary packets - not supported for HTTP protocol
+                    last_error = Some(GameServerError {
+                        error_type: "ProtocolError".to_string(),
+                        message: format!("Pair {}: Binary packets are not supported for HTTP/HTTPS protocol", pair_idx + 1),
+                        line: None,
+                    });
+                    break;
+                }
+            }
         }
     };
 

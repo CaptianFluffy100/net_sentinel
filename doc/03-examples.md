@@ -8,7 +8,8 @@ Real-world examples of pseudo-code scripts for different game server protocols.
 2. [RCON Protocol](#rcon-protocol)
 3. [Minecraft Protocol](#minecraft-protocol)
 4. [Source Engine Query](#source-engine-query)
-5. [Custom Protocol Examples](#custom-protocol-examples)
+5. [HTTP/HTTPS REST API Examples](#httphttps-rest-api-examples)
+6. [Custom Protocol Examples](#custom-protocol-examples)
 
 ## Simple UDP Query
 
@@ -307,6 +308,278 @@ OUTPUT_END
    - `EXPECT_MAGIC "FFFFFFFF"` - Validate magic bytes
    - Read various server information fields
    - Use `READ_SHORT_BE` for big-endian integers
+
+## HTTP/HTTPS REST API Examples
+
+HTTP/HTTPS support allows monitoring REST APIs, web services, and HTTP-based endpoints. Unlike TCP/UDP which sends raw binary packets, HTTP/HTTPS constructs proper HTTP requests with methods, headers, query parameters, and request bodies.
+
+### Protocol Selection
+
+When adding a game server or endpoint, set the protocol to either:
+- `HTTP` - For unencrypted HTTP connections (default port 80)
+- `HTTPS` - For encrypted HTTPS connections (default port 443)
+
+**Port Handling:**
+- If no port is specified, the default port is used (80 for HTTP, 443 for HTTPS)
+- If a port is specified, it will be used (e.g., `8080` for HTTP on non-standard port)
+
+### Example 1: Simple GET Request
+
+A basic GET request to retrieve server status.
+
+```pseudo
+HTTP_START REQUEST GET /api/status
+HTTP_END
+
+RESPONSE_START
+EXPECT_STATUS 200
+EXPECT_HEADER Content-Type application/json
+READ_BODY_JSON response
+RESPONSE_END
+
+OUTPUT_SUCCESS
+RETURN "status=response.status, uptime=response.uptime"
+OUTPUT_END
+```
+
+**Explanation:**
+1. **Request Construction:**
+   - `HTTP_START REQUEST GET /api/status` - Creates a GET request to `/api/status`
+   - `HTTP_END` - Closes the request block
+
+2. **Response Parsing:**
+   - `EXPECT_STATUS 200` - Validates successful response
+   - `EXPECT_HEADER Content-Type application/json` - Validates JSON response
+   - `READ_BODY_JSON response` - Parses JSON response into `response` variable
+
+3. **Output:**
+   - Accesses nested JSON fields: `response.status`, `response.uptime`
+
+### Example 2: GET Request with Query Parameters
+
+A GET request with query parameters for filtering/searching.
+
+```pseudo
+HTTP_START REQUEST GET /api/search
+PARAM q hello
+PARAM limit 10
+PARAM page 1
+HTTP_END
+
+RESPONSE_START
+EXPECT_STATUS 200
+READ_BODY_JSON results
+RESPONSE_END
+
+OUTPUT_SUCCESS
+RETURN "count=results.data.length, total=results.total"
+OUTPUT_END
+```
+
+**Explanation:**
+- `PARAM` commands add query parameters: `/api/search?q=hello&limit=10&page=1`
+- Parameters are automatically URL-encoded
+
+### Example 3: POST Request with JSON Body
+
+A POST request to create a resource with JSON data.
+
+```pseudo
+HTTP_START REQUEST POST /api/users
+HEADER Authorization Bearer abc123token
+HEADER User-Agent NetSentinel/1.0
+BODY_START TYPE RAW
+DATA {
+  "name": "John Doe",
+  "email": "john@example.com",
+  "active": true
+}
+BODY_END
+HTTP_END
+
+RESPONSE_START
+EXPECT_STATUS 201
+EXPECT_HEADER Content-Type application/json
+READ_BODY_JSON user
+RESPONSE_END
+
+OUTPUT_SUCCESS
+RETURN "user_id=user.id, created_at=user.created_at"
+OUTPUT_END
+```
+
+**Explanation:**
+1. **Request Construction:**
+   - `HEADER Authorization Bearer abc123token` - Adds authentication header
+   - `BODY_START TYPE RAW` - Specifies raw body (JSON)
+   - `DATA {...}` - JSON body (automatically stringified)
+   - `BODY_END` - Closes body section
+
+2. **Response:**
+   - Expects status `201` (Created)
+   - Parses JSON response into `user` variable
+
+### Example 4: POST Request with Form Data
+
+A POST request with URL-encoded form data.
+
+```pseudo
+HTTP_START REQUEST POST /api/login
+BODY_START TYPE FORM
+DATA username=admin
+DATA password=secret123
+DATA remember=true
+BODY_END
+HTTP_END
+
+RESPONSE_START
+EXPECT_STATUS 200
+READ_BODY_JSON login_response
+RESPONSE_END
+
+OUTPUT_SUCCESS
+RETURN "token=login_response.token, expires=login_response.expires_at"
+OUTPUT_END
+```
+
+**Explanation:**
+- `BODY_START TYPE FORM` - Specifies form-encoded body
+- Form data is automatically URL-encoded
+- Content-Type is automatically set to `application/x-www-form-urlencoded`
+
+### Example 5: Multiple Requests (Authentication Flow)
+
+A complete example showing authentication followed by an authenticated request.
+
+```pseudo
+# First request: Login
+HTTP_START REQUEST POST /api/login
+BODY_START TYPE RAW
+DATA {"username": "admin", "password": "secret"}
+BODY_END
+HTTP_END
+
+RESPONSE_START
+EXPECT_STATUS 200
+READ_BODY_JSON login_response
+RESPONSE_END
+
+# Second request: Get user info (using token from first response)
+HTTP_START REQUEST GET /api/users/me
+HEADER Authorization Bearer login_response.token
+HTTP_END
+
+RESPONSE_START
+EXPECT_STATUS 200
+READ_BODY_JSON user_info
+RESPONSE_END
+
+OUTPUT_SUCCESS
+RETURN "username=user_info.username, email=user_info.email"
+OUTPUT_END
+```
+
+**Explanation:**
+- First request authenticates and receives a token
+- Second request uses the token from `login_response.token` in the Authorization header
+- Variables from previous responses can be used in subsequent requests
+
+### Example 6: Reading Plain Text Response
+
+A request that reads a plain text response instead of JSON.
+
+```pseudo
+HTTP_START REQUEST GET /api/health
+HTTP_END
+
+RESPONSE_START
+EXPECT_STATUS 200
+EXPECT_HEADER Content-Type text/plain
+READ_BODY responseText
+RESPONSE_END
+
+OUTPUT_SUCCESS
+RETURN "health=responseText"
+OUTPUT_END
+```
+
+**Explanation:**
+- `READ_BODY responseText` - Reads response as raw UTF-8 text
+- Useful for plain text, HTML, XML, or other non-JSON formats
+
+### Example 7: Using Variables in Requests
+
+Using variables for dynamic request construction.
+
+```pseudo
+CODE_START
+STRING api_key = "abc123"
+STRING endpoint = "/api/data"
+INT page = 1
+INT limit = 10
+CODE_END
+
+HTTP_START REQUEST GET endpoint
+HEADER X-API-Key api_key
+PARAM page page
+PARAM limit limit
+HTTP_END
+
+RESPONSE_START
+EXPECT_STATUS 200
+READ_BODY_JSON data
+RESPONSE_END
+
+OUTPUT_SUCCESS
+RETURN "items=data.items.length, total=data.total"
+OUTPUT_END
+```
+
+**Explanation:**
+- Variables can be used in paths, headers, and query parameters
+- Makes scripts more maintainable and reusable
+
+### Example 8: Error Handling
+
+Proper error handling for HTTP requests.
+
+```pseudo
+HTTP_START REQUEST GET /api/status
+HTTP_END
+
+RESPONSE_START
+EXPECT_STATUS 200
+READ_BODY_JSON response
+RESPONSE_END
+
+OUTPUT_SUCCESS
+RETURN "status=response.status, uptime=response.uptime"
+OUTPUT_END
+
+OUTPUT_ERROR
+RETURN "error=<ERROR REASON>"
+OUTPUT_END
+```
+
+**Common Error Scenarios:**
+- Connection errors: Host unreachable, DNS resolution failure
+- Timeout: Server doesn't respond within timeout period
+- SSL/TLS errors: Invalid certificates (for HTTPS)
+- Status code mismatches: When `EXPECT_STATUS` doesn't match
+- Header mismatches: When `EXPECT_HEADER` doesn't match
+- JSON parsing errors: When `READ_BODY_JSON` fails to parse
+- Text parsing errors: When `READ_BODY` fails to decode as UTF-8
+
+### HTTPS vs HTTP
+
+The protocol selection (`HTTP` vs `HTTPS`) determines:
+- **HTTP**: Unencrypted connection on port 80 (default)
+- **HTTPS**: Encrypted TLS/SSL connection on port 443 (default)
+
+All syntax and commands are identical between HTTP and HTTPS. The only difference is:
+- The underlying connection uses TLS encryption for HTTPS
+- Certificate validation is performed automatically
+- Self-signed certificates may cause connection failures (this is expected behavior)
 
 ## Custom Protocol Examples
 

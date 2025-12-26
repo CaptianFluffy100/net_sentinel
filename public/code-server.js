@@ -29,6 +29,7 @@
         monaco.languages.setMonarchTokensProvider('pseudo-code', {
             keywords: [
                 'PACKET_START', 'PACKET_END',
+                'HTTP_START', 'HTTP_END',
                 'RESPONSE_START', 'RESPONSE_END',
                 'CODE_START', 'CODE_END',
                 'OUTPUT_SUCCESS', 'OUTPUT_ERROR', 'OUTPUT_END',
@@ -45,11 +46,16 @@
             readCommands: [
                 'READ_BYTE', 'READ_SHORT', 'READ_SHORT_BE',
                 'READ_INT', 'READ_INT_BE', 'READ_VARINT',
-                'READ_STRING', 'READ_STRING_NULL', 'SKIP_BYTES'
+                'READ_STRING', 'READ_STRING_NULL', 'SKIP_BYTES',
+                'READ_BODY_JSON', 'READ_BODY'
             ],
             
             validationCommands: [
-                'EXPECT_BYTE', 'EXPECT_MAGIC'
+                'EXPECT_BYTE', 'EXPECT_MAGIC', 'EXPECT_STATUS', 'EXPECT_HEADER'
+            ],
+            
+            httpCommands: [
+                'PARAM', 'HEADER', 'BODY_START', 'DATA', 'BODY_END'
             ],
             
             types: [
@@ -80,7 +86,7 @@
                     [/\b\d+\b/, 'number'],
                     
                     // Keywords
-                    [/\b(PACKET_START|PACKET_END|RESPONSE_START|RESPONSE_END|CODE_START|CODE_END|OUTPUT_SUCCESS|OUTPUT_ERROR|OUTPUT_END)\b/, 'keyword'],
+                    [/\b(PACKET_START|PACKET_END|HTTP_START|HTTP_END|RESPONSE_START|RESPONSE_END|CODE_START|CODE_END|OUTPUT_SUCCESS|OUTPUT_ERROR|OUTPUT_END)\b/, 'keyword'],
                     
                     // Control flow
                     [/\b(IF|ELSE|FOR|IN|BREAK)\b/, 'keyword.control'],
@@ -89,10 +95,16 @@
                     [/\b(WRITE_BYTE|WRITE_SHORT|WRITE_SHORT_BE|WRITE_INT|WRITE_INT_BE|WRITE_VARINT|WRITE_STRING|WRITE_STRING_LEN|WRITE_BYTES)\b/, 'keyword.write'],
                     
                     // Read commands
-                    [/\b(READ_BYTE|READ_SHORT|READ_SHORT_BE|READ_INT|READ_INT_BE|READ_VARINT|READ_STRING|READ_STRING_NULL|SKIP_BYTES)\b/, 'keyword.read'],
+                    [/\b(READ_BYTE|READ_SHORT|READ_SHORT_BE|READ_INT|READ_INT_BE|READ_VARINT|READ_STRING|READ_STRING_NULL|SKIP_BYTES|READ_BODY_JSON|READ_BODY)\b/, 'keyword.read'],
                     
                     // Validation commands
-                    [/\b(EXPECT_BYTE|EXPECT_MAGIC)\b/, 'keyword.validation'],
+                    [/\b(EXPECT_BYTE|EXPECT_MAGIC|EXPECT_STATUS|EXPECT_HEADER)\b/, 'keyword.validation'],
+                    
+                    // HTTP commands
+                    [/\b(PARAM|HEADER|BODY_START|DATA|BODY_END)\b/, 'keyword.http'],
+                    
+                    // HTTP methods (for HTTP_START REQUEST)
+                    [/\b(GET|POST|PUT|DELETE|PATCH|Custom)\b/, 'keyword.http.method'],
                     
                     // Variable types
                     [/\b(STRING|INT|BYTE|FLOAT|ARRAY)\b/, 'type'],
@@ -117,6 +129,7 @@
                             '@writeCommands': 'keyword.write',
                             '@readCommands': 'keyword.read',
                             '@validationCommands': 'keyword.validation',
+                            '@httpCommands': 'keyword.http',
                             '@types': 'type',
                             '@functions': 'function',
                             '@placeholders': 'variable.predefined',
@@ -157,6 +170,8 @@
                 { token: 'keyword.write', foreground: '4EC9B0' },
                 { token: 'keyword.read', foreground: 'DCDCAA' },
                 { token: 'keyword.validation', foreground: 'CE9178' },
+                { token: 'keyword.http', foreground: '569CD6' },
+                { token: 'keyword.http.method', foreground: '4FC1FF', fontStyle: 'bold' },
                 { token: 'type', foreground: '4EC9B0' },
                 { token: 'function', foreground: 'DCDCAA' },
                 { token: 'function.return', foreground: 'CE93D8', fontStyle: 'bold' },
@@ -202,7 +217,22 @@
                 // Packet construction commands
                 suggestions.push(
                     createSuggestion('PACKET_START', monaco.languages.CompletionItemKind.Keyword, 'Marks the beginning of a packet definition', 'PACKET_START', false),
-                    createSuggestion('PACKET_END', monaco.languages.CompletionItemKind.Keyword, 'Marks the end of a packet definition', 'PACKET_END', false),
+                    createSuggestion('PACKET_END', monaco.languages.CompletionItemKind.Keyword, 'Marks the end of a packet definition', 'PACKET_END', false)
+                );
+                
+                // HTTP request commands
+                suggestions.push(
+                    createSuggestion('HTTP_START', monaco.languages.CompletionItemKind.Keyword, 'Marks the beginning of an HTTP request. Example: HTTP_START REQUEST GET /api/status', 'HTTP_START REQUEST ${1:GET|POST|PUT|DELETE} ${2:/path}', true),
+                    createSuggestion('HTTP_END', monaco.languages.CompletionItemKind.Keyword, 'Marks the end of an HTTP request', 'HTTP_END', false),
+                    createSuggestion('PARAM', monaco.languages.CompletionItemKind.Function, 'Adds a query parameter to the request URL. Example: PARAM key value', 'PARAM ${1:key} ${2:value}', true),
+                    createSuggestion('HEADER', monaco.languages.CompletionItemKind.Function, 'Adds an HTTP header to the request. Example: HEADER Content-Type application/json', 'HEADER ${1:key} ${2:value}', true),
+                    createSuggestion('BODY_START', monaco.languages.CompletionItemKind.Function, 'Marks the beginning of the request body. Example: BODY_START TYPE RAW', 'BODY_START TYPE ${1:FORM|RAW}', true),
+                    createSuggestion('DATA', monaco.languages.CompletionItemKind.Function, 'Adds body content. JSON is automatically stringified. Example: DATA {"key": "value"}', 'DATA ${1:content}', true),
+                    createSuggestion('BODY_END', monaco.languages.CompletionItemKind.Keyword, 'Marks the end of the request body', 'BODY_END', false)
+                );
+                
+                // Packet construction commands (continued)
+                suggestions.push(
                     createSuggestion('WRITE_BYTE', monaco.languages.CompletionItemKind.Function, 'Writes a single byte (0-255). Example: WRITE_BYTE 0xFF', 'WRITE_BYTE ${1:value}', true),
                     createSuggestion('WRITE_SHORT', monaco.languages.CompletionItemKind.Function, 'Writes a 16-bit integer (little-endian). Example: WRITE_SHORT 1234', 'WRITE_SHORT ${1:value}', true),
                     createSuggestion('WRITE_SHORT_BE', monaco.languages.CompletionItemKind.Function, 'Writes a 16-bit integer (big-endian/network byte order). Example: WRITE_SHORT_BE 1234', 'WRITE_SHORT_BE ${1:value}', true),
@@ -232,7 +262,15 @@
                 // Validation commands
                 suggestions.push(
                     createSuggestion('EXPECT_BYTE', monaco.languages.CompletionItemKind.Function, 'Validates that the next byte matches the expected value. Example: EXPECT_BYTE 0xFE', 'EXPECT_BYTE ${1:value}', true),
-                    createSuggestion('EXPECT_MAGIC', monaco.languages.CompletionItemKind.Function, 'Validates that the next bytes match the expected magic bytes. Example: EXPECT_MAGIC "FEEDFACE"', 'EXPECT_MAGIC "${1:hex_string}"', true)
+                    createSuggestion('EXPECT_MAGIC', monaco.languages.CompletionItemKind.Function, 'Validates that the next bytes match the expected magic bytes. Example: EXPECT_MAGIC "FEEDFACE"', 'EXPECT_MAGIC "${1:hex_string}"', true),
+                    createSuggestion('EXPECT_STATUS', monaco.languages.CompletionItemKind.Function, 'Validates HTTP response status code. Example: EXPECT_STATUS 200', 'EXPECT_STATUS ${1:200}', true),
+                    createSuggestion('EXPECT_HEADER', monaco.languages.CompletionItemKind.Function, 'Validates HTTP response header. Example: EXPECT_HEADER Content-Type application/json', 'EXPECT_HEADER ${1:key} ${2:value}', true)
+                );
+                
+                // HTTP response parsing
+                suggestions.push(
+                    createSuggestion('READ_BODY_JSON', monaco.languages.CompletionItemKind.Function, 'Parses the HTTP response body as JSON and stores it in a variable. Example: READ_BODY_JSON response', 'READ_BODY_JSON ${1:var_name}', true),
+                    createSuggestion('READ_BODY', monaco.languages.CompletionItemKind.Function, 'Reads the HTTP response body as raw text and stores it in a variable. Example: READ_BODY bodyText', 'READ_BODY ${1:var_name}', true)
                 );
                 
                 // Code block commands

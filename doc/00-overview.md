@@ -21,19 +21,22 @@ Monitor any website's availability. You can check:
 
 ### 3. Game Server Monitoring
 The most powerful feature: monitor game servers using **pseudo-code scripts**. These scripts allow you to:
-- Send custom packets to game servers
-- Parse server responses
+- Send custom packets to game servers (TCP/UDP protocols)
+- Send HTTP/HTTPS requests to REST APIs and web services
+- Parse server responses (binary packets or HTTP responses)
 - Extract server information (player count, version, etc.)
 - Format results for Prometheus metrics
 
 ## What is Pseudo-Code?
 
 **Pseudo-code** is a simple scripting language that lets you describe:
-1. **What packets to send** to a game server
+1. **What packets to send** to a game server (or HTTP requests for REST APIs)
 2. **How to parse the response** from the server
 3. **How to format the output** for monitoring
 
 Instead of writing complex Rust code, you write simple, readable instructions like:
+
+**For TCP/UDP protocols:**
 ```
 PACKET_START
 WRITE_BYTE 0xFF
@@ -45,7 +48,19 @@ READ_STRING_NULL server_info
 RESPONSE_END
 ```
 
-This makes it easy for anyone to create monitoring scripts for different game server protocols without needing to know Rust or low-level networking.
+**For HTTP/HTTPS protocols:**
+```
+HTTP_START REQUEST GET /api/status
+HEADER Authorization Bearer token123
+HTTP_END
+
+RESPONSE_START
+EXPECT_STATUS 200
+READ_BODY_JSON response
+RESPONSE_END
+```
+
+This makes it easy for anyone to create monitoring scripts for different game server protocols and REST APIs without needing to know Rust or low-level networking.
 
 ## How It Works
 
@@ -76,7 +91,7 @@ This makes it easy for anyone to create monitoring scripts for different game se
          │
          ▼
 ┌─────────────────┐
-│  Network Layer   │  ← Sends/receives via TCP/UDP
+│  Network Layer   │  ← Sends/receives via TCP/UDP/HTTP/HTTPS
 │  (gameserver)    │
 └────────┬────────┘
          │
