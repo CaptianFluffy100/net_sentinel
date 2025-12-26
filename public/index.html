@@ -148,6 +148,17 @@
             background: #1d4ed8;
         }
 
+        button:disabled {
+            background: #475569;
+            color: #94a3b8;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        button:disabled:hover {
+            background: #475569;
+        }
+
         button.delete {
             background: #ef4444;
             padding: 8px 16px;
@@ -156,6 +167,15 @@
 
         button.delete:hover {
             background: #dc2626;
+        }
+
+        button.delete:disabled {
+            background: #475569;
+            color: #94a3b8;
+        }
+
+        button.delete:disabled:hover {
+            background: #475569;
         }
 
         button.edit {
@@ -168,6 +188,15 @@
             background: #d97706;
         }
 
+        button.edit:disabled {
+            background: #475569;
+            color: #94a3b8;
+        }
+
+        button.edit:disabled:hover {
+            background: #475569;
+        }
+
         button.test {
             background: #10b981;
             padding: 8px 16px;
@@ -176,6 +205,15 @@
 
         button.test:hover {
             background: #059669;
+        }
+
+        button.test:disabled {
+            background: #475569;
+            color: #94a3b8;
+        }
+
+        button.test:disabled:hover {
+            background: #475569;
         }
 
         .isp-list,
@@ -474,6 +512,172 @@
         .gameserver-details strong {
             color: #cbd5e1;
         }
+
+        /* Fullscreen Editor Styles */
+        .fullscreen-btn {
+            background: transparent;
+            border: 1px solid #334155;
+            color: #94a3b8;
+            padding: 6px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+
+        .fullscreen-btn:hover {
+            background: rgba(96, 165, 250, 0.1);
+            border-color: #60a5fa;
+            color: #60a5fa;
+        }
+
+        .fullscreen-editor-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #0f172a;
+            z-index: 9999;
+            flex-direction: column;
+        }
+
+        .fullscreen-editor-overlay.active {
+            display: flex;
+        }
+
+        .fullscreen-navbar {
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+            padding: 12px 20px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .fullscreen-navbar .form-group {
+            margin-bottom: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .fullscreen-navbar label {
+            margin-bottom: 0;
+            font-size: 0.85rem;
+            color: #cbd5e1;
+            white-space: nowrap;
+        }
+
+        .fullscreen-navbar input,
+        .fullscreen-navbar select {
+            padding: 6px 10px;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 4px;
+            color: #e2e8f0;
+            font-size: 0.9rem;
+            min-width: 120px;
+        }
+
+        .fullscreen-editor-container {
+            flex: 1;
+            display: flex;
+            position: relative;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        .fullscreen-editor-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            min-width: 0;
+        }
+
+        .fullscreen-monaco-container {
+            flex: 1;
+            border: none;
+            border-radius: 0;
+            min-height: 0;
+        }
+
+        .fullscreen-output-panel {
+            width: 400px;
+            background: #1e293b;
+            border-left: 1px solid #334155;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .fullscreen-output-content {
+            flex: 1;
+            padding: 20px;
+        }
+
+        .fullscreen-actions {
+            padding: 12px 20px;
+            background: #1e293b;
+            border-top: 1px solid #334155;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .fullscreen-actions button {
+            padding: 8px 16px;
+            font-size: 0.9rem;
+        }
+
+        /* Variable/Parsed Value Display */
+        .var-parse-item {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .var-parse-name {
+            font-weight: 600;
+            color: #60a5fa;
+            font-size: 0.95rem;
+            margin-bottom: 8px;
+        }
+
+        .var-parse-data {
+            color: #cbd5e1;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+            font-size: 0.85rem;
+            word-break: break-all;
+            margin-bottom: 8px;
+        }
+
+        .var-parse-add {
+            background: transparent;
+            border: 1px dashed #475569;
+            color: #94a3b8;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+            width: 100%;
+        }
+
+        .var-parse-add:hover {
+            background: rgba(96, 165, 250, 0.1);
+            border-color: #60a5fa;
+            color: #60a5fa;
+        }
     </style>
 </head>
 <body>
@@ -586,50 +790,42 @@
                             <input type="number" id="protocol-editor-timeout" placeholder="5000" min="1000" value="5000">
                         </div>
                         <div class="form-group">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                             <label for="protocol-editor-code">Pseudo-code</label>
+                                <button type="button" id="fullscreen-toggle" class="fullscreen-btn" title="Toggle Fullscreen">
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M2 2h4v2H4v2H2V2zm8 0h4v4h-2V4h-2V2zM2 12v-2h2v2h2v2H2v-2zm12 0v2h-4v-2h2v-2h2v2z" fill="currentColor"/>
+                                    </svg>
+                                </button>
+                            </div>
                             <div id="monaco-editor-container"></div>
                         </div>
                         <div class="editor-actions">
                             <button type="button" id="protocol-editor-test">Test</button>
-                            <button type="button" id="protocol-editor-save">Save Game Server</button>
+                            <button type="button" id="protocol-editor-save" disabled>Save</button>
                             <button type="button" id="protocol-editor-clear">Clear</button>
                         </div>
                     </div>
                     <div class="pseudo-output" id="protocol-editor-output">
                         <p class="editor-status" id="protocol-editor-status">Status: Ready to test your script</p>
-                        <pre id="protocol-editor-raw">Raw Response will appear here after preview</pre>
+                        <pre id="protocol-editor-raw" style="max-height: 300px; overflow-y: auto;">Raw Response will appear here after preview</pre>
                         <div>
                             <p class="editor-subtitle">Variables</p>
-                            <table class="parsed-table" id="protocol-editor-variables">
-                                <thead>
-                                    <tr>
-                                        <th>Variable</th>
-                                        <th>Value</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr>
-                                        <td>No variables</td>
-                                        <td>Variables from CODE blocks will appear here</td>
-                                    </tr>
-                                </tbody>
-                            </table>
+                            <div id="protocol-editor-variables">
+                                <div class="var-parse-item">
+                                    <div class="var-parse-name">No variables</div>
+                                    <div class="var-parse-data">Variables from CODE blocks will appear here</div>
+                                </div>
+                            </div>
                         </div>
                         <div>
                             <p class="editor-subtitle">Parsed Values</p>
-                            <table class="parsed-table" id="protocol-editor-parsed">
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>Value</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr>
-                                        <td colspan="2">No parsed values yet</td>
-                                    </tr>
-                                </tbody>
-                            </table>
+                            <div id="protocol-editor-parsed">
+                                <div class="var-parse-item">
+                                    <div class="var-parse-name">No parsed values</div>
+                                    <div class="var-parse-data">Parsed values will appear here</div>
+                                </div>
+                            </div>
                         </div>
                         <p class="editor-subtitle" id="protocol-editor-response-time">Response Time: --</p>
                         <div class="output-section">
@@ -653,6 +849,51 @@
         </div>
     </div>
 
+    <!-- Fullscreen Editor Overlay -->
+    <div id="fullscreen-editor-overlay" class="fullscreen-editor-overlay">
+        <div class="fullscreen-navbar">
+            <div class="form-group">
+                <label for="fullscreen-editor-name">Name:</label>
+                <input type="text" id="fullscreen-editor-name" placeholder="Test Server">
+            </div>
+            <div class="form-group">
+                <label for="fullscreen-editor-address">Address:</label>
+                <input type="text" id="fullscreen-editor-address" placeholder="example.com">
+            </div>
+            <div class="form-group">
+                <label for="fullscreen-editor-port">Port:</label>
+                <input type="number" id="fullscreen-editor-port" placeholder="25565" min="1" max="65535">
+            </div>
+            <div class="form-group">
+                <label for="fullscreen-editor-protocol">Protocol:</label>
+                <select id="fullscreen-editor-protocol">
+                    <option value="UDP">UDP</option>
+                    <option value="TCP">TCP</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="fullscreen-editor-timeout">Timeout (ms):</label>
+                <input type="number" id="fullscreen-editor-timeout" placeholder="5000" min="1000" value="5000">
+            </div>
+        </div>
+        <div class="fullscreen-editor-container">
+            <div class="fullscreen-editor-main">
+                <div id="fullscreen-monaco-container" class="fullscreen-monaco-container"></div>
+                <div class="fullscreen-actions">
+                    <button type="button" id="fullscreen-editor-test">Test</button>
+                    <button type="button" id="fullscreen-editor-save" disabled>Save</button>
+                    <button type="button" id="fullscreen-editor-clear">Clear</button>
+                    <button type="button" id="fullscreen-editor-close" class="delete">Exit Fullscreen</button>
+                </div>
+            </div>
+            <div id="fullscreen-output-panel" class="fullscreen-output-panel">
+                <div class="fullscreen-output-content" id="fullscreen-output-content">
+                    <!-- Output content will be moved here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Delete Confirmation Modal -->
     <div id="delete-modal" class="modal">
         <div class="modal-content">
@@ -670,6 +911,29 @@
 
         // Monaco Editor instance
         let monacoEditor = null;
+        let fullscreenEditor = null;
+        let isFullscreen = false;
+        let isTestRunning = false;
+        
+        // Track initial state for Save button enable/disable (regular editor)
+        let initialCode = '';
+        let initialFormData = {
+            name: '',
+            address: '',
+            port: '',
+            protocol: '',
+            timeout: ''
+        };
+        
+        // Track initial state for fullscreen editor
+        let initialFullscreenCode = '';
+        let initialFullscreenFormData = {
+            name: '',
+            address: '',
+            port: '',
+            protocol: '',
+            timeout: ''
+        };
 
         // Initialize Monaco Editor
         require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
@@ -738,10 +1002,492 @@ RESPONSE_END`,
                         enabled: true
                     },
                 });
+                
+                // Initialize initial state tracking
+                initialCode = monacoEditor.getValue();
+                initialFormData = {
+                    name: document.getElementById('protocol-editor-name').value,
+                    address: document.getElementById('protocol-editor-address').value,
+                    port: document.getElementById('protocol-editor-port').value,
+                    protocol: document.getElementById('protocol-editor-protocol').value,
+                    timeout: document.getElementById('protocol-editor-timeout').value
+                };
+                
+                // Add change listeners
+                setupChangeTracking();
             }
             
             initEditor();
+            
+            // Initialize fullscreen editor (hidden initially)
+            createFullscreenEditor();
         });
+
+        // Fullscreen Editor Functions
+        function createFullscreenEditor() {
+            // Wait for Monaco to be available
+            if (typeof monaco === 'undefined' || !monaco.editor) {
+                setTimeout(createFullscreenEditor, 100);
+                return;
+            }
+            
+            const container = document.getElementById('fullscreen-monaco-container');
+            if (container && !fullscreenEditor) {
+                fullscreenEditor = monaco.editor.create(container, {
+                    value: '',
+                    language: 'pseudo-code',
+                    theme: 'pseudo-code-theme',
+                    automaticLayout: true,
+                    fontSize: 14,
+                    minimap: { enabled: true },
+                    wordWrap: 'on',
+                    lineNumbers: 'on',
+                    scrollBeyondLastLine: false,
+                    suggestOnTriggerCharacters: true,
+                    quickSuggestions: {
+                        other: true,
+                        comments: false,
+                        strings: false
+                    },
+                    parameterHints: {
+                        enabled: true
+                    },
+                });
+            }
+        }
+        
+        function setupChangeTracking() {
+            // Track code changes
+            if (monacoEditor) {
+                monacoEditor.onDidChangeModelContent(() => {
+                    checkForChanges();
+                });
+            }
+            
+            // Track form field changes
+            const fields = ['protocol-editor-name', 'protocol-editor-address', 'protocol-editor-port', 'protocol-editor-protocol', 'protocol-editor-timeout'];
+            fields.forEach(fieldId => {
+                const field = document.getElementById(fieldId);
+                if (field) {
+                    field.addEventListener('input', checkForChanges);
+                    field.addEventListener('change', checkForChanges);
+                }
+            });
+        }
+        
+        function setupFullscreenChangeTracking() {
+            // Track fullscreen code changes
+            if (fullscreenEditor) {
+                fullscreenEditor.onDidChangeModelContent(() => {
+                    checkForFullscreenChanges();
+                });
+            }
+            
+            // Track fullscreen form field changes
+            const fields = ['fullscreen-editor-name', 'fullscreen-editor-address', 'fullscreen-editor-port', 'fullscreen-editor-protocol', 'fullscreen-editor-timeout'];
+            fields.forEach(fieldId => {
+                const field = document.getElementById(fieldId);
+                if (field) {
+                    field.addEventListener('input', checkForFullscreenChanges);
+                    field.addEventListener('change', checkForFullscreenChanges);
+                }
+            });
+        }
+        
+        function checkForChanges() {
+            if (!monacoEditor) return;
+            
+            const currentCode = monacoEditor.getValue();
+            const currentFormData = {
+                name: document.getElementById('protocol-editor-name').value,
+                address: document.getElementById('protocol-editor-address').value,
+                port: document.getElementById('protocol-editor-port').value,
+                protocol: document.getElementById('protocol-editor-protocol').value,
+                timeout: document.getElementById('protocol-editor-timeout').value
+            };
+            
+            const codeChanged = currentCode !== initialCode;
+            const formChanged = JSON.stringify(currentFormData) !== JSON.stringify(initialFormData);
+            
+            protocolEditorSaveButton.disabled = !(codeChanged || formChanged);
+        }
+        
+        function checkForFullscreenChanges() {
+            if (!fullscreenEditor) return;
+            
+            const currentCode = fullscreenEditor.getValue();
+            const currentFormData = {
+                name: document.getElementById('fullscreen-editor-name').value,
+                address: document.getElementById('fullscreen-editor-address').value,
+                port: document.getElementById('fullscreen-editor-port').value,
+                protocol: document.getElementById('fullscreen-editor-protocol').value,
+                timeout: document.getElementById('fullscreen-editor-timeout').value
+            };
+            
+            const codeChanged = currentCode !== initialFullscreenCode;
+            const formChanged = JSON.stringify(currentFormData) !== JSON.stringify(initialFullscreenFormData);
+            
+            const fullscreenSaveBtn = document.getElementById('fullscreen-editor-save');
+            if (fullscreenSaveBtn) {
+                fullscreenSaveBtn.disabled = !(codeChanged || formChanged);
+            }
+        }
+
+        // Fullscreen toggle button
+        document.addEventListener('DOMContentLoaded', () => {
+            const fullscreenToggleBtn = document.getElementById('fullscreen-toggle');
+            if (fullscreenToggleBtn) {
+                fullscreenToggleBtn.addEventListener('click', () => {
+                    if (!isFullscreen) {
+                        enterFullscreen();
+                    } else {
+                        exitFullscreen();
+                    }
+                });
+            }
+
+            // Exit fullscreen button
+            const exitFullscreenBtn = document.getElementById('fullscreen-editor-close');
+            if (exitFullscreenBtn) {
+                exitFullscreenBtn.addEventListener('click', exitFullscreen);
+            }
+
+
+            // Fullscreen editor action handlers
+            const fullscreenTestBtn = document.getElementById('fullscreen-editor-test');
+            if (fullscreenTestBtn) {
+                fullscreenTestBtn.addEventListener('click', async () => {
+                    await runFullscreenTest();
+                });
+            }
+
+            const fullscreenSaveBtn = document.getElementById('fullscreen-editor-save');
+            if (fullscreenSaveBtn) {
+                fullscreenSaveBtn.addEventListener('click', async () => {
+                    await saveFullscreenGameServer();
+                });
+            }
+
+            const fullscreenClearBtn = document.getElementById('fullscreen-editor-clear');
+            if (fullscreenClearBtn) {
+                fullscreenClearBtn.addEventListener('click', () => {
+                    // Reset output to default state, but keep it visible
+                    const outputContent = document.getElementById('fullscreen-output-content');
+                    outputContent.innerHTML = `
+                        <p class="editor-status">Status: Ready to test your script</p>
+                        <pre style="max-height: 300px; overflow-y: auto;">Raw Response will appear here after preview</pre>
+                        <div><p class="editor-subtitle">Variables</p>
+                            <div class="var-parse-item">
+                                <div class="var-parse-name">No variables</div>
+                                <div class="var-parse-data">Variables from CODE blocks will appear here</div>
+                            </div>
+                        </div>
+                        <div><p class="editor-subtitle">Parsed Values</p>
+                            <div class="var-parse-item">
+                                <div class="var-parse-name">No parsed values</div>
+                                <div class="var-parse-data">Parsed values will appear here</div>
+                            </div>
+                        </div>
+                        <p class="editor-subtitle">Response Time: --</p>
+                        <div class="output-section"><p class="editor-subtitle">Output Success</p><div class="output-labels">Output labels will appear here once the test finishes.</div></div>
+                        <div class="output-section"><p class="editor-subtitle">Output Error</p><div class="output-labels">Error labels will appear here if the test fails.</div></div>
+                    `;
+                });
+            }
+        });
+
+        function enterFullscreen() {
+            isFullscreen = true;
+            const overlay = document.getElementById('fullscreen-editor-overlay');
+            overlay.classList.add('active');
+            
+            // Copy values from regular editor to fullscreen editor
+            if (monacoEditor && fullscreenEditor) {
+                fullscreenEditor.setValue(monacoEditor.getValue());
+            }
+            
+            // Sync form fields
+            document.getElementById('fullscreen-editor-name').value = document.getElementById('protocol-editor-name').value;
+            document.getElementById('fullscreen-editor-address').value = document.getElementById('protocol-editor-address').value;
+            document.getElementById('fullscreen-editor-port').value = document.getElementById('protocol-editor-port').value;
+            document.getElementById('fullscreen-editor-protocol').value = document.getElementById('protocol-editor-protocol').value;
+            document.getElementById('fullscreen-editor-timeout').value = document.getElementById('protocol-editor-timeout').value;
+            
+            // Move output content to fullscreen output panel
+            const outputSource = document.getElementById('protocol-editor-output');
+            const outputDest = document.getElementById('fullscreen-output-content');
+            outputDest.innerHTML = outputSource.innerHTML;
+            
+            // Initialize fullscreen initial state tracking
+            initialFullscreenCode = fullscreenEditor ? fullscreenEditor.getValue() : '';
+            initialFullscreenFormData = {
+                name: document.getElementById('fullscreen-editor-name').value,
+                address: document.getElementById('fullscreen-editor-address').value,
+                port: document.getElementById('fullscreen-editor-port').value,
+                protocol: document.getElementById('fullscreen-editor-protocol').value,
+                timeout: document.getElementById('fullscreen-editor-timeout').value
+            };
+            
+            // Setup change tracking if not already done
+            if (fullscreenEditor) {
+                setupFullscreenChangeTracking();
+                // Initially disable save button (no changes yet)
+                const fullscreenSaveBtn = document.getElementById('fullscreen-editor-save');
+                if (fullscreenSaveBtn) {
+                    fullscreenSaveBtn.disabled = true;
+                }
+                checkForFullscreenChanges();
+            }
+            
+            // Layout fullscreen editor
+            setTimeout(() => {
+                if (fullscreenEditor) {
+                    fullscreenEditor.layout();
+                }
+            }, 100);
+        }
+
+        function exitFullscreen() {
+            isFullscreen = false;
+            const overlay = document.getElementById('fullscreen-editor-overlay');
+            overlay.classList.remove('active');
+            
+            // Copy values back from fullscreen editor to regular editor
+            if (fullscreenEditor && monacoEditor) {
+                monacoEditor.setValue(fullscreenEditor.getValue());
+            }
+            
+            // Sync form fields back
+            document.getElementById('protocol-editor-name').value = document.getElementById('fullscreen-editor-name').value;
+            document.getElementById('protocol-editor-address').value = document.getElementById('fullscreen-editor-address').value;
+            document.getElementById('protocol-editor-port').value = document.getElementById('fullscreen-editor-port').value;
+            document.getElementById('protocol-editor-protocol').value = document.getElementById('fullscreen-editor-protocol').value;
+            document.getElementById('protocol-editor-timeout').value = document.getElementById('fullscreen-editor-timeout').value;
+            
+            // Layout regular editor
+            setTimeout(() => {
+                if (monacoEditor) {
+                    monacoEditor.layout();
+                }
+            }, 100);
+        }
+
+        async function runFullscreenTest() {
+            if (isTestRunning) return;
+            
+            const name = document.getElementById('fullscreen-editor-name').value.trim() || 'Test Server';
+            const address = document.getElementById('fullscreen-editor-address').value.trim();
+            const port = parseInt(document.getElementById('fullscreen-editor-port').value, 10);
+            const protocol = document.getElementById('fullscreen-editor-protocol').value;
+            const timeoutMs = parseInt(document.getElementById('fullscreen-editor-timeout').value, 10) || 5000;
+            const pseudoCode = fullscreenEditor ? fullscreenEditor.getValue() : '';
+
+            if (!address) {
+                alert('Server address required');
+                return;
+            }
+
+            if (!(port > 0 && port <= 65535)) {
+                alert('Port must be between 1 and 65535');
+                return;
+            }
+
+            if (!pseudoCode) {
+                alert('Pseudo-code is required');
+                return;
+            }
+
+            // Disable test buttons
+            isTestRunning = true;
+            protocolEditorTestButton.disabled = true;
+            const fullscreenTestBtn = document.getElementById('fullscreen-editor-test');
+            if (fullscreenTestBtn) fullscreenTestBtn.disabled = true;
+
+            try {
+                const response = await fetch('/api/gameservers/test', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name,
+                        address,
+                        port,
+                        protocol,
+                        timeout_ms: timeoutMs,
+                        pseudo_code: pseudoCode,
+                    }),
+                });
+
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error?.message || result.error || 'Failed to run test');
+                }
+
+                // Update fullscreen output with results
+                updateFullscreenOutput(result);
+                
+                // Also update regular output
+                const status = result.success
+                    ? '✅ Server response received'
+                    : `❌ ${result.error?.message || 'Validation failed'}`;
+                const parsed = formatParsedValues(result.parsed_values);
+                const variables = result.variables || result.parsed_values || {};
+                renderProtocolOutput({
+                    status,
+                    raw: result.raw_response ?? 'No response recorded',
+                    parsed: parsed.length ? parsed : [],
+                    variables: variables,
+                    time: typeof result.response_time_ms === 'number' ? `${result.response_time_ms} ms` : '--',
+                    outputLabelsSuccess: result.output_labels_success || [],
+                    outputLabelsError: result.output_labels_error || [],
+                });
+            } catch (error) {
+                alert(`Test failed: ${error.message}`);
+            } finally {
+                // Re-enable test buttons
+                isTestRunning = false;
+                protocolEditorTestButton.disabled = false;
+                const fullscreenTestBtn = document.getElementById('fullscreen-editor-test');
+                if (fullscreenTestBtn) fullscreenTestBtn.disabled = false;
+            }
+        }
+
+        async function saveFullscreenGameServer() {
+            const name = document.getElementById('fullscreen-editor-name').value.trim();
+            const address = document.getElementById('fullscreen-editor-address').value.trim();
+            const port = parseInt(document.getElementById('fullscreen-editor-port').value, 10);
+            const protocol = document.getElementById('fullscreen-editor-protocol').value;
+            const timeoutMs = parseInt(document.getElementById('fullscreen-editor-timeout').value, 10) || 5000;
+            const pseudoCode = fullscreenEditor ? fullscreenEditor.getValue() : '';
+
+            if (!name || !address || !(port > 0 && port <= 65535) || !pseudoCode) {
+                alert('Please fill in all required fields');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/gameservers', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name,
+                        address,
+                        port,
+                        protocol,
+                        timeout_ms: timeoutMs,
+                        pseudo_code: pseudoCode,
+                    }),
+                });
+
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || 'Failed to save game server');
+                }
+
+                alert(`Game server "${name}" saved successfully!`);
+                
+                // Update initial state after save (fullscreen)
+                initialFullscreenCode = fullscreenEditor ? fullscreenEditor.getValue() : '';
+                initialFullscreenFormData = {
+                    name: document.getElementById('fullscreen-editor-name').value,
+                    address: document.getElementById('fullscreen-editor-address').value,
+                    port: document.getElementById('fullscreen-editor-port').value,
+                    protocol: document.getElementById('fullscreen-editor-protocol').value,
+                    timeout: document.getElementById('fullscreen-editor-timeout').value
+                };
+                checkForFullscreenChanges();
+                
+                // Also update regular editor state
+                if (monacoEditor) {
+                    initialCode = monacoEditor.getValue();
+                    initialFormData = {
+                        name: document.getElementById('protocol-editor-name').value,
+                        address: document.getElementById('protocol-editor-address').value,
+                        port: document.getElementById('protocol-editor-port').value,
+                        protocol: document.getElementById('protocol-editor-protocol').value,
+                        timeout: document.getElementById('protocol-editor-timeout').value
+                    };
+                    checkForChanges();
+                }
+                
+                loadGameServers();
+            } catch (error) {
+                alert(`Failed to save game server: ${error.message}`);
+            }
+        }
+
+        function updateFullscreenOutput(result) {
+            const outputContent = document.getElementById('fullscreen-output-content');
+            const status = result.success
+                ? '✅ Server response received'
+                : `❌ ${result.error?.message || 'Validation failed'}`;
+            const parsed = formatParsedValues(result.parsed_values);
+            const variables = result.variables || result.parsed_values || {};
+            
+            // Create output HTML similar to regular output
+            let html = `<p class="editor-status">Status: ${status}</p>`;
+            html += `<pre style="max-height: 300px; overflow-y: auto;">${escapeHtml(result.raw_response ?? 'No response recorded')}</pre>`;
+            
+            // Variables in new format
+            html += '<div><p class="editor-subtitle">Variables</p>';
+            if (Object.keys(variables).length === 0) {
+                html += '<div class="var-parse-item"><div class="var-parse-name">No variables</div><div class="var-parse-data">Variables from CODE blocks will appear here</div></div>';
+            } else {
+                Object.entries(variables).forEach(([name, value]) => {
+                    let displayValue = value;
+                    if (typeof value === 'object') {
+                        if (Array.isArray(value)) {
+                            displayValue = `[${value.map(v => JSON.stringify(v)).join(', ')}]`;
+                        } else {
+                            displayValue = JSON.stringify(value);
+                        }
+                    } else if (typeof value === 'string') {
+                        displayValue = `"${value}"`;
+                    }
+                    html += `<div class="var-parse-item"><div class="var-parse-name">${escapeHtml(String(name))}</div><div class="var-parse-data">${escapeHtml(String(displayValue))}</div></div>`;
+                });
+            }
+            html += '</div>';
+            
+            // Parsed values in new format
+            html += '<div><p class="editor-subtitle">Parsed Values</p>';
+            if (parsed.length === 0) {
+                html += '<div class="var-parse-item"><div class="var-parse-name">No parsed values</div><div class="var-parse-data">Parsed values will appear here</div></div>';
+            } else {
+                parsed.forEach(item => {
+                    html += `<div class="var-parse-item"><div class="var-parse-name">${escapeHtml(item.name)}</div><div class="var-parse-data">${escapeHtml(String(item.value))}</div></div>`;
+                });
+            }
+            html += '</div>';
+            
+            html += `<p class="editor-subtitle">Response Time: ${typeof result.response_time_ms === 'number' ? `${result.response_time_ms} ms` : '--'}</p>`;
+            
+            // Output labels
+            html += '<div class="output-section"><p class="editor-subtitle">Output Success</p><div class="output-labels">';
+            if (result.output_labels_success && result.output_labels_success.length > 0) {
+                result.output_labels_success.forEach(label => {
+                    html += `<div>${escapeHtml(label)}</div>`;
+                });
+            } else {
+                html += 'Output labels will appear here once the test finishes.';
+            }
+            html += '</div></div>';
+            
+            html += '<div class="output-section"><p class="editor-subtitle">Output Error</p><div class="output-labels">';
+            if (result.output_labels_error && result.output_labels_error.length > 0) {
+                result.output_labels_error.forEach(label => {
+                    html += `<div>${escapeHtml(label)}</div>`;
+                });
+            } else {
+                html += 'Error labels will appear here if the test fails.';
+            }
+            html += '</div></div>';
+            
+            outputContent.innerHTML = html;
+        }
 
         // Tab switching
         document.querySelectorAll('.tab-button').forEach(button => {
@@ -1196,22 +1942,14 @@ RESPONSE_END`,
         function renderProtocolVariables(variables) {
             if (!variables || Object.keys(variables).length === 0) {
                 protocolEditorVariables.innerHTML = `
-                    <thead>
-                        <tr>
-                            <th>Variable</th>
-                            <th>Value</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>No variables</td>
-                            <td>Variables from CODE blocks will appear here</td>
-                        </tr>
-                    </tbody>
+                    <div class="var-parse-item">
+                        <div class="var-parse-name">No variables</div>
+                        <div class="var-parse-data">Variables from CODE blocks will appear here</div>
+                    </div>
                 `;
                 return;
             }
-            const rows = Object.entries(variables)
+            const items = Object.entries(variables)
                 .map(([name, value]) => {
                     let displayValue = value;
                     if (typeof value === 'object') {
@@ -1224,63 +1962,48 @@ RESPONSE_END`,
                         displayValue = `"${value}"`;
                     }
                     return `
-                        <tr>
-                            <td>${escapeHtml(String(name))}</td>
-                            <td>${escapeHtml(String(displayValue))}</td>
-                        </tr>
+                        <div class="var-parse-item">
+                            <div class="var-parse-name">${escapeHtml(String(name))}</div>
+                            <div class="var-parse-data">${escapeHtml(String(displayValue))}</div>
+                        </div>
                     `;
                 })
                 .join('');
-            protocolEditorVariables.innerHTML = `
-                <thead>
-                    <tr>
-                        <th>Variable</th>
-                        <th>Value</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${rows}
-                </tbody>
-            `;
+            protocolEditorVariables.innerHTML = items;
         }
+        
+        function addNewVariable() {
+            // Placeholder for adding new variables
+            console.log('Add new variable clicked');
+        }
+        window.addNewVariable = addNewVariable;
 
         function renderProtocolParsed(values) {
             if (!values || values.length === 0) {
                 protocolEditorParsed.innerHTML = `
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Value</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td colspan="2">No parsed values yet</td>
-                        </tr>
-                    </tbody>
+                    <div class="var-parse-item">
+                        <div class="var-parse-name">No parsed values</div>
+                        <div class="var-parse-data">Parsed values will appear here</div>
+                    </div>
                 `;
                 return;
             }
-            const rows = values
+            const items = values
                 .map((item) => `
-                    <tr>
-                        <td>${escapeHtml(item.name)}</td>
-                        <td>${escapeHtml(String(item.value))}</td>
-                    </tr>
+                    <div class="var-parse-item">
+                        <div class="var-parse-name">${escapeHtml(item.name)}</div>
+                        <div class="var-parse-data">${escapeHtml(String(item.value))}</div>
+                    </div>
                 `)
                 .join('');
-            protocolEditorParsed.innerHTML = `
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Value</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${rows}
-                </tbody>
-            `;
+            protocolEditorParsed.innerHTML = items;
         }
+        
+        function addNewParsed() {
+            // Placeholder for adding new parsed values
+            console.log('Add new parsed clicked');
+        }
+        window.addNewParsed = addNewParsed;
 
         function renderProtocolOutput({ status, raw, parsed, variables, time, outputLabelsSuccess, outputLabelsError }) {
             protocolEditorStatus.textContent = `Status: ${status}`;
@@ -1406,6 +2129,11 @@ RESPONSE_END`,
                     outputLabelsError: [],
                 });
                 appendProtocolLog(`Test failed: ${error.message}`, 'error');
+            } finally {
+                // Re-enable test buttons
+                isTestRunning = false;
+                protocolEditorTestButton.disabled = false;
+                if (fullscreenTestBtn) fullscreenTestBtn.disabled = false;
             }
         });
 
@@ -1475,6 +2203,18 @@ RESPONSE_END`,
 
                 appendProtocolLog(`Game server "${name}" saved successfully!`, 'success');
                 protocolEditorSaveButton.removeAttribute('data-server-id');
+                
+                // Update initial state after save
+                initialCode = monacoEditor ? monacoEditor.getValue() : '';
+                initialFormData = {
+                    name: document.getElementById('protocol-editor-name').value,
+                    address: document.getElementById('protocol-editor-address').value,
+                    port: document.getElementById('protocol-editor-port').value,
+                    protocol: document.getElementById('protocol-editor-protocol').value,
+                    timeout: document.getElementById('protocol-editor-timeout').value
+                };
+                checkForChanges();
+                
                 loadGameServers();
             } catch (error) {
                 appendProtocolLog(`Failed to save game server: ${error.message}`, 'error');
