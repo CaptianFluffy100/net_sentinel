@@ -1,4 +1,5 @@
 mod api;
+mod code_server;
 mod db;
 mod models;
 mod packet_parser;
@@ -25,6 +26,7 @@ async fn main() -> anyhow::Result<()> {
     // Build our application with routes
     let app = Router::new()
         .route("/", get(index_handler))
+        .route("/api/code-server.js", get(code_server::language_server_handler))
         .route("/api/isps", get(api::list_isps))
         .route("/api/isps", post(api::create_isp))
         .route("/api/isps/:id", delete(api::delete_isp))
@@ -53,7 +55,7 @@ struct AppState {
 }
 
 async fn index_handler() -> impl IntoResponse {
-    let html = include_str!("../templates/index.html").replace("{{VERSION}}", VERSION);
+    let html = include_str!("../public/index.html").replace("{{VERSION}}", VERSION);
     Html(html)
 }
 

@@ -6,6 +6,8 @@
     <title>Net Sentinel - Network Monitor</title>
     <!-- Monaco Editor -->
     <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+    <!-- Pseudo-Code Language Server (load after Monaco) -->
+    <script src="/api/code-server.js" defer></script>
     <style>
         * {
             margin: 0;
@@ -672,8 +674,38 @@
         // Initialize Monaco Editor
         require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
         require(['vs/editor/editor.main'], function () {
-            monacoEditor = monaco.editor.create(document.getElementById('monaco-editor-container'), {
-                value: `# Minecraft-style query
+            // Wait for language server to be loaded (it loads asynchronously)
+            function initEditor() {
+                // If editor already exists, don't initialize again
+                if (monacoEditor) {
+                    return;
+                }
+                
+                if (typeof window.pseudoCodeLanguageServerLoaded !== 'undefined' && window.pseudoCodeLanguageServerLoaded) {
+                    createEditor();
+                } else {
+                    // Wait for language server to load
+                    let editorCreated = false;
+                    const createEditorOnce = () => {
+                        if (!editorCreated) {
+                            editorCreated = true;
+                            createEditor();
+                        }
+                    };
+                    window.addEventListener('pseudoCodeLanguageServerReady', createEditorOnce, { once: true });
+                    // Fallback timeout - if language server doesn't load in 2 seconds, proceed anyway
+                    setTimeout(createEditorOnce, 2000);
+                }
+            }
+            
+            function createEditor() {
+                // Prevent creating duplicate editors
+                if (monacoEditor) {
+                    return;
+                }
+                
+                monacoEditor = monaco.editor.create(document.getElementById('monaco-editor-container'), {
+                    value: `# Minecraft-style query
 PACKET_START
 WRITE_BYTE 0xFE
 WRITE_BYTE 0xFD
@@ -688,15 +720,27 @@ READ_BYTE packet_type
 READ_STRING_NULL session_id
 READ_STRING_NULL challenge_token
 RESPONSE_END`,
-                language: 'plaintext',
-                theme: 'vs-dark',
-                automaticLayout: true,
-                fontSize: 14,
-                minimap: { enabled: true },
-                wordWrap: 'on',
-                lineNumbers: 'on',
-                scrollBeyondLastLine: false,
-            });
+                    language: 'pseudo-code',
+                    theme: 'pseudo-code-theme',
+                    automaticLayout: true,
+                    fontSize: 14,
+                    minimap: { enabled: true },
+                    wordWrap: 'on',
+                    lineNumbers: 'on',
+                    scrollBeyondLastLine: false,
+                    suggestOnTriggerCharacters: true,
+                    quickSuggestions: {
+                        other: true,
+                        comments: false,
+                        strings: false
+                    },
+                    parameterHints: {
+                        enabled: true
+                    },
+                });
+            }
+            
+            initEditor();
         });
 
         // Tab switching
