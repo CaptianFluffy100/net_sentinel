@@ -273,7 +273,9 @@ HEADER User-Agent NetSentinel/1.0
 HEADER Accept application/json
 ```
 
-**Note:** `Content-Type` is automatically set based on `BODY_START TYPE`, but can be overridden explicitly.
+**Note:** 
+- `Content-Type` is automatically set based on `BODY_START TYPE`, but can be overridden explicitly.
+- **Do not set the `Host` header manually** - it is automatically set by the HTTP client based on the server address and port. Manually setting it can cause 400 Bad Request errors.
 
 ### `BODY_START TYPE <TYPE>`
 

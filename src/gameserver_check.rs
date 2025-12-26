@@ -370,6 +370,8 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                     let url = url.to_string();
                     
                     println!("[HTTP] Sending {} request to {}", prepared_req.method, url);
+                    println!("[HTTP] Request details: method={}, path={}, params={:?}, headers={:?}", 
+                             prepared_req.method, prepared_req.path, prepared_req.params, prepared_req.headers);
                     
                     // Build request
                     let request_builder = match prepared_req.method.as_str() {
@@ -383,10 +385,40 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                         }
                     };
                     
-                    // Add headers
+                    // Add headers (handle Authorization specially for bearer tokens)
                     let mut request_builder = request_builder;
+                    let mut has_user_agent = false;
+                    let mut has_authorization = false;
+                    
                     for (key, value) in &prepared_req.headers {
-                        request_builder = request_builder.header(key, value);
+                        // Check if this is an Authorization header with Bearer token
+                        if key.eq_ignore_ascii_case("Authorization") && value.starts_with("Bearer ") {
+                            if !has_authorization {
+                                let token = value.strip_prefix("Bearer ").unwrap_or(value);
+                                println!("[HTTP] Adding Authorization header (Bearer token): {}", token);
+                                request_builder = request_builder.bearer_auth(token);
+                                has_authorization = true;
+                            } else {
+                                println!("[HTTP] Skipping duplicate Authorization header");
+                            }
+                        } else {
+                            if key.eq_ignore_ascii_case("User-Agent") {
+                                has_user_agent = true;
+                            }
+                            // Skip duplicate Authorization headers
+                            if key.eq_ignore_ascii_case("Authorization") && has_authorization {
+                                println!("[HTTP] Skipping duplicate Authorization header");
+                                continue;
+                            }
+                            println!("[HTTP] Adding header: {} = {}", key, value);
+                            request_builder = request_builder.header(key, value);
+                        }
+                    }
+                    
+                    // Add default User-Agent if not provided (some APIs require it)
+                    if !has_user_agent {
+                        println!("[HTTP] Adding default User-Agent header");
+                        request_builder = request_builder.header("User-Agent", "NetSentinel/1.0");
                     }
                     
                     // Add body if present
@@ -412,6 +444,8 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                     };
                     
                     let status_code = response.status().as_u16();
+                    println!("[HTTP] Response status: {}", status_code);
+                    println!("[HTTP] Response headers: {:?}", response.headers());
                     let headers = response.headers().clone();
                     let body_bytes = match response.bytes().await {
                         Ok(bytes) => bytes.to_vec(),

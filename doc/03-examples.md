@@ -569,6 +569,48 @@ OUTPUT_END
 - Header mismatches: When `EXPECT_HEADER` doesn't match
 - JSON parsing errors: When `READ_BODY_JSON` fails to parse
 - Text parsing errors: When `READ_BODY` fails to decode as UTF-8
+- **400 Bad Request**: Often caused by manually setting the `Host` header - the `Host` header is automatically set by the HTTP client and should not be set manually
+
+### Example 9: GET Request with Bearer Token Authentication
+
+A GET request with Bearer token authentication to retrieve server resources.
+
+```pseudo
+HTTP_START REQUEST GET /api/client/servers/<SERVER ID>/resources
+HEADER Authorization Bearer <CLIENT-TOKEN>
+HEADER User-Agent NetSentinel/1.0
+HEADER Accept application/json
+HTTP_END
+
+RESPONSE_START
+READ_BODY_JSON servers
+RESPONSE_END
+
+OUTPUT_SUCCESS
+RETURN "cpu_absolute=servers.attributes.resources.cpu_absolute, disk_bytes=servers.attributes.resources.disk_bytes, network_rx_bytes=servers.attributes.resources.network_rx_bytes, network_tx_bytes=servers.attributes.resources.network_tx_bytes, uptime=servers.attributes.resources.uptime"
+OUTPUT_END
+
+OUTPUT_ERROR
+RETURN "server=HOST, error=ERROR"
+OUTPUT_END
+```
+
+**Explanation:**
+1. **Request Construction:**
+   - `HTTP_START REQUEST GET /api/client/servers/<SERVER ID>/resources` - Creates a GET request with a path parameter placeholder
+   - `HEADER Authorization Bearer <CLIENT-TOKEN>` - Adds Bearer token authentication (replace `<CLIENT-TOKEN>` with actual token)
+   - `HEADER User-Agent NetSentinel/1.0` - Sets the User-Agent header
+   - `HEADER Accept application/json` - Specifies expected JSON response format
+
+2. **Response Parsing:**
+   - `READ_BODY_JSON servers` - Parses JSON response into `servers` variable
+   - Accesses nested JSON fields using dot notation: `servers.attributes.resources.cpu_absolute`
+
+3. **Output:**
+   - Success output extracts multiple resource metrics from nested JSON structure
+   - Error output includes server hostname and error reason
+
+**Note:** Replace `<SERVER ID>` and `<CLIENT-TOKEN>` with actual values when using this script. Path parameters and tokens can also be set using variables in a `CODE_START` block for better maintainability.
 
 ### HTTPS vs HTTP
 

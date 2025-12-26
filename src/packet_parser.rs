@@ -294,6 +294,8 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
             if let Some(mut http_req) = current_http_request.take() {
                 http_req = build_http_request_from_commands(http_req, &current_http_commands)?;
                 current_http_request = Some(http_req);
+                // Clear commands after building to prevent duplication
+                current_http_commands.clear();
             }
             in_http = false;
             line_num += 1;
@@ -363,8 +365,8 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
                 });
                 current_packets.clear();
             } else if current_http_request.is_some() {
-                let mut http_req = current_http_request.take().unwrap();
-                http_req = build_http_request_from_commands(http_req, &current_http_commands)?;
+                // HTTP request was already built at HTTP_END, just use it
+                let http_req = current_http_request.take().unwrap();
                 println!("[PARSER] Saving HTTP request/response pair (response: {} commands)", current_response.len());
                 if should_close {
                     println!("[PARSER] This pair will close connection before sending");
@@ -375,6 +377,7 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
                     response: current_response.clone(),
                     close_connection_before: should_close,
                 });
+                // Commands were already cleared at HTTP_END, but clear again just in case
                 current_http_commands.clear();
             }
             current_response.clear();
@@ -462,8 +465,8 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
             close_connection_before: close_connection_before_next,
         });
     } else if current_http_request.is_some() {
-        let mut http_req = current_http_request.take().unwrap();
-        http_req = build_http_request_from_commands(http_req, &current_http_commands)?;
+        // HTTP request was already built at HTTP_END, just use it
+        let http_req = current_http_request.take().unwrap();
         println!("[PARSER] Saving final HTTP request/response pair (response: {} commands)", current_response.len());
         pairs.push(PacketResponsePair {
             packets: Vec::new(),
@@ -2265,10 +2268,14 @@ pub fn prepare_http_request_with_vars(
         resolved_params.push((resolved_key, resolved_value));
     }
     
-    // Resolve headers
+    // Resolve headers (filter out Host header - it's automatically set by the HTTP client)
     let mut resolved_headers = Vec::new();
     for (key, value) in &http_req.headers {
         let resolved_key = resolve_string_value(key, vars)?;
+        // Skip Host header - it's automatically set by reqwest based on the URL
+        if resolved_key.eq_ignore_ascii_case("Host") {
+            continue;
+        }
         let resolved_value = resolve_string_value(value, vars)?;
         resolved_headers.push((resolved_key, resolved_value));
     }
