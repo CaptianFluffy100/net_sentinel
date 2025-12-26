@@ -1254,5 +1254,5 @@ Now that you've seen complete examples:
 
 ---
 
-**Congratulations!** You've completed two real-world examples. You now have the knowledge to create monitoring scripts for any game server protocol! 🎮
+**Congratulations!** You've completed three real-world examples. You now have the knowledge to create monitoring scripts for any game server protocol! 🎮
 
