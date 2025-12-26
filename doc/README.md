@@ -1,5 +1,7 @@
 # Net Sentinel Documentation
 
+![Main Page](../images/main-page.png)
+
 Welcome to the Net Sentinel documentation! This documentation explains how to write pseudo-code scripts for monitoring game servers.
 
 ## 📚 Documentation Structure

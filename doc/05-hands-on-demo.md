@@ -1,5 +1,7 @@
 # Hands-On Demo: RCON, Minecraft, and Source Engine
 
+![Code Editor](../images/code.png)
+
 This guide walks you through three complete, real-world examples:
 1. **RCON with TabTPS** - Querying server performance metrics via RCON
 2. **Minecraft Status Ping** - Getting server status using Minecraft's protocol
@@ -1070,6 +1072,8 @@ OUTPUT_END
 ---
 
 ## Testing Your Scripts
+
+![Test Run](../images/code-test-run.png)
 
 ### Testing RCON Script
 

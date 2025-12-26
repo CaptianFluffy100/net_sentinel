@@ -6,6 +6,8 @@ See the LICENSE file for details.
 
 A network monitoring service built with Rust and Axum that tracks ISP connectivity, website availability, and game server status using custom pseudo-code scripts.
 
+![Main Page](images/main-page.png)
+
 ## Features
 
 - **ISP Monitoring**: Check internet connectivity by testing multiple ISP endpoints

@@ -2,6 +2,8 @@
 
 ## What is Net Sentinel?
 
+![Main Page](../images/main-page.png)
+
 Net Sentinel is a network monitoring tool that checks the health and status of:
 - **ISPs** (Internet Service Providers) - to verify internet connectivity
 - **Websites** - to check if websites are accessible
