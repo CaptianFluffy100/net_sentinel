@@ -195,7 +195,6 @@ pub struct PacketScript {
 }
 
 pub fn parse_script(script: &str) -> Result<PacketScript> {
-    println!("[PARSER] Starting script parsing...");
     let lines: Vec<&str> = script.lines().collect();
     let mut pairs = Vec::new();
     let mut current_packets = Vec::new(); // Accumulate multiple packets
@@ -226,16 +225,12 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
         
         // Skip empty lines and comments
         if line.is_empty() || line.starts_with('#') {
-            if line.starts_with('#') {
-                println!("[PARSER] Line {}: Comment skipped: {}", line_num + 1, line);
-            }
             line_num += 1;
             continue;
         }
 
         // Connection close command
         if line == "CONNECTION_CLOSE" {
-            println!("[PARSER] Line {}: CONNECTION_CLOSE command", line_num + 1);
             close_connection_before_next = true;
             line_num += 1;
             continue;
@@ -243,8 +238,6 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
 
         // HTTP section
         if line.starts_with("HTTP_START REQUEST ") {
-            println!("[PARSER] Line {}: Entering HTTP_START section", line_num + 1);
-            
             // Parse HTTP_START REQUEST <METHOD> <PATH>
             let rest = line.strip_prefix("HTTP_START REQUEST ").unwrap();
             let parts: Vec<&str> = rest.split_whitespace().collect();
@@ -289,7 +282,6 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
             continue;
         }
         if line == "HTTP_END" {
-            println!("[PARSER] Line {}: Exiting HTTP section", line_num + 1);
             // Build the HTTP request from accumulated commands
             if let Some(mut http_req) = current_http_request.take() {
                 http_req = build_http_request_from_commands(http_req, &current_http_commands)?;
@@ -304,19 +296,13 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
         
         // Packet section
         if line == "PACKET_START" {
-            println!("[PARSER] Line {}: Entering PACKET_START section", line_num + 1);
             // If we were already in a packet, save the current packet to the packets list
             if in_packet && !current_packet.is_empty() {
-                println!("[PARSER] Saving packet with {} commands to packets list", current_packet.len());
                 current_packets.push(current_packet.clone());
                 current_packet.clear();
             }
             // Mark this new pair to close connection before it if CONNECTION_CLOSE was seen
-            let should_close = close_connection_before_next;
             close_connection_before_next = false; // Reset flag
-            if should_close {
-                println!("[PARSER] This PACKET_START will close connection before sending");
-            }
             in_packet = true;
             in_http = false;
             in_response = false;
@@ -324,12 +310,10 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
             continue;
         }
         if line == "PACKET_END" {
-            println!("[PARSER] Line {}: Exiting PACKET section (found {} commands)", line_num + 1, current_packet.len());
             if !current_packet.is_empty() {
                 // Save this packet to the packets list
                 current_packets.push(current_packet.clone());
                 current_packet.clear();
-                println!("[PARSER] Packet saved, total packets in current group: {}", current_packets.len());
             }
             in_packet = false;
             line_num += 1;
@@ -338,7 +322,6 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
         
         // Response section
         if line == "RESPONSE_START" {
-            println!("[PARSER] Line {}: Entering RESPONSE_START section", line_num + 1);
             in_response = true;
             in_packet = false;
             in_code = false;
@@ -346,17 +329,11 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
             continue;
         }
         if line == "RESPONSE_END" {
-            println!("[PARSER] Line {}: Exiting RESPONSE section (found {} commands)", line_num + 1, current_response.len());
             // When response ends, save all accumulated packets or HTTP request with the response
             let should_close = close_connection_before_next;
             close_connection_before_next = false; // Reset flag
             
             if !current_packets.is_empty() {
-                println!("[PARSER] Saving packet/response pair ({} packet(s), response: {} commands)", 
-                         current_packets.len(), current_response.len());
-                if should_close {
-                    println!("[PARSER] This pair will close connection before sending");
-                }
                 pairs.push(PacketResponsePair {
                     packets: current_packets.clone(),
                     http_request: None,
@@ -367,10 +344,6 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
             } else if current_http_request.is_some() {
                 // HTTP request was already built at HTTP_END, just use it
                 let http_req = current_http_request.take().unwrap();
-                println!("[PARSER] Saving HTTP request/response pair (response: {} commands)", current_response.len());
-                if should_close {
-                    println!("[PARSER] This pair will close connection before sending");
-                }
                 pairs.push(PacketResponsePair {
                     packets: Vec::new(),
                     http_request: Some(http_req),
@@ -388,11 +361,9 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
 
         // Code section
         if line == "CODE_START" {
-            println!("[PARSER] Line {}: Entering CODE_START section", line_num + 1);
             // If we have accumulated packets but no response yet, we need to save them first
             // This can happen if CODE_START appears after PACKET_END but before RESPONSE_START
             if !current_packets.is_empty() && current_response.is_empty() {
-                println!("[PARSER] WARNING: CODE_START encountered with {} accumulated packet(s) but no response. Packets will be lost!", current_packets.len());
                 current_packets.clear();
             }
             in_code = true;
@@ -403,7 +374,6 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
             continue;
         }
         if line == "CODE_END" {
-            println!("[PARSER] Line {}: Exiting CODE section (found {} commands)", line_num + 1, current_code.len());
             if !current_code.is_empty() {
                 code_blocks.push(CodeBlock {
                     commands: current_code.clone(),
@@ -416,20 +386,16 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
         }
 
         if in_http {
-            println!("[PARSER] Line {}: Parsing HTTP command: {}", line_num + 1, line);
             let cmd = parse_http_command(line, line_num + 1)?;
             current_http_commands.push(cmd);
             line_num += 1;
         } else if in_packet {
-            println!("[PARSER] Line {}: Parsing packet command: {}", line_num + 1, line);
             current_packet.push(parse_packet_command(line, line_num + 1)?);
             line_num += 1;
         } else if in_response {
-            println!("[PARSER] Line {}: Parsing response command: {}", line_num + 1, line);
             current_response.push(parse_response_command(line, line_num + 1)?);
             line_num += 1;
         } else if in_code {
-            println!("[PARSER] Line {}: Parsing code command: {}", line_num + 1, line);
             let indent_level = lines[line_num].len() - lines[line_num].trim_start().len();
             
             if line.ends_with(':') && (line.starts_with("FOR ") || line.starts_with("IF ")) {
@@ -456,8 +422,6 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
 
     // Save any remaining packet/response pair
     if !current_packets.is_empty() {
-        println!("[PARSER] Saving final packet/response pair ({} packet(s), response: {} commands)", 
-                 current_packets.len(), current_response.len());
         pairs.push(PacketResponsePair {
             packets: current_packets,
             http_request: None,
@@ -467,7 +431,6 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
     } else if current_http_request.is_some() {
         // HTTP request was already built at HTTP_END, just use it
         let http_req = current_http_request.take().unwrap();
-        println!("[PARSER] Saving final HTTP request/response pair (response: {} commands)", current_response.len());
         pairs.push(PacketResponsePair {
             packets: Vec::new(),
             http_request: Some(http_req),
@@ -487,7 +450,6 @@ pub fn parse_script(script: &str) -> Result<PacketScript> {
         });
     }
 
-    println!("[PARSER] Script parsing complete: {} packet/response pair(s), {} code block(s)", pairs.len(), code_blocks.len());
     Ok(PacketScript {
         pairs,
         output_blocks,
@@ -1591,29 +1553,22 @@ pub fn build_packets(script: &PacketScript) -> Result<Vec<Vec<u8>>> {
 }
 
 pub fn build_packets_with_vars(script: &PacketScript, vars: &IndexMap<String, JsonValue>) -> Result<Vec<Vec<u8>>> {
-    println!("[BUILD] Starting packet construction with {} pair(s)", script.pairs.len());
     let mut built_packets = Vec::new();
 
-    for (pair_idx, pair) in script.pairs.iter().enumerate() {
+    for (_pair_idx, pair) in script.pairs.iter().enumerate() {
         // Build all packets for this pair
-        for (packet_in_pair_idx, packet_commands) in pair.packets.iter().enumerate() {
-            println!("[BUILD] Building packet {} (pair {}, packet {}) with {} commands", 
-                     built_packets.len() + 1, pair_idx + 1, packet_in_pair_idx + 1, packet_commands.len());
-            let packet_idx = built_packets.len() + 1; // For logging compatibility
+        for (_packet_in_pair_idx, packet_commands) in pair.packets.iter().enumerate() {
             let mut packet = Vec::new();
             let mut varint_placeholders = Vec::new();
         let mut int_placeholders = Vec::new(); // (position, big_endian)
 
-        for (idx, cmd) in packet_commands.iter().enumerate() {
+        for (_idx, cmd) in packet_commands.iter().enumerate() {
             match cmd {
                 PacketCommand::WriteByte(v) => {
-                    println!("[BUILD] Packet {} Command {}: WRITE_BYTE 0x{:02X} ({})", packet_idx + 1, idx + 1, v, v);
                     packet.push(*v);
                 }
                 PacketCommand::WriteByteVar(var_name) => {
                     let value = get_u8_from_json(&resolve_var_value(vars, var_name)?)?;
-                    println!("[BUILD] Packet {} Command {}: WRITE_BYTE {} (var: {}) = 0x{:02X} ({})", 
-                             packet_idx + 1, idx + 1, var_name, var_name, value, value);
                     packet.push(value);
                 }
                 PacketCommand::WriteShort(v, big_endian) => {
@@ -1622,8 +1577,6 @@ pub fn build_packets_with_vars(script: &PacketScript, vars: &IndexMap<String, Js
                     } else {
                         v.to_le_bytes()
                     };
-                    println!("[BUILD] Packet {} Command {}: WRITE_SHORT{} {} (bytes: {:02X} {:02X})", 
-                             packet_idx + 1, idx + 1, if *big_endian { "_BE" } else { "" }, v, bytes[0], bytes[1]);
                     packet.extend_from_slice(&bytes);
                 }
                 PacketCommand::WriteShortVar(var_name, big_endian) => {
@@ -1633,8 +1586,6 @@ pub fn build_packets_with_vars(script: &PacketScript, vars: &IndexMap<String, Js
                     } else {
                         value.to_le_bytes()
                     };
-                    println!("[BUILD] Packet {} Command {}: WRITE_SHORT{} {} (var: {}) = {} (bytes: {:02X} {:02X})", 
-                             packet_idx + 1, idx + 1, if *big_endian { "_BE" } else { "" }, var_name, var_name, value, bytes[0], bytes[1]);
                     packet.extend_from_slice(&bytes);
                 }
                 PacketCommand::WriteInt(v, big_endian) => {
@@ -1643,9 +1594,6 @@ pub fn build_packets_with_vars(script: &PacketScript, vars: &IndexMap<String, Js
                     } else {
                         v.to_le_bytes()
                     };
-                    println!("[BUILD] Packet {} Command {}: WRITE_INT{} {} (bytes: {:02X} {:02X} {:02X} {:02X})", 
-                             packet_idx + 1, idx + 1, if *big_endian { "_BE" } else { "" }, v, 
-                             bytes[0], bytes[1], bytes[2], bytes[3]);
                     packet.extend_from_slice(&bytes);
                 }
                 PacketCommand::WriteIntVar(var_name, big_endian) => {
@@ -1655,21 +1603,14 @@ pub fn build_packets_with_vars(script: &PacketScript, vars: &IndexMap<String, Js
                     } else {
                         value.to_le_bytes()
                     };
-                    println!("[BUILD] Packet {} Command {}: WRITE_INT{} {} (var: {}) = {} (bytes: {:02X} {:02X} {:02X} {:02X})", 
-                             packet_idx + 1, idx + 1, if *big_endian { "_BE" } else { "" }, var_name, var_name, value,
-                             bytes[0], bytes[1], bytes[2], bytes[3]);
                     packet.extend_from_slice(&bytes);
                 }
                 PacketCommand::WriteString(text, length_opt) => {
                     if let Some(length) = length_opt {
                         let mut bytes = text.as_bytes().to_vec();
                         bytes.resize(*length, 0);
-                        println!("[BUILD] Packet {} Command {}: WRITE_STRING_LEN \"{}\" {} ({} bytes, padded)", 
-                                 packet_idx + 1, idx + 1, text, length, length);
                         packet.extend_from_slice(&bytes[..*length]);
                     } else {
-                        println!("[BUILD] Packet {} Command {}: WRITE_STRING \"{}\" ({} bytes + null terminator)", 
-                                 packet_idx + 1, idx + 1, text, text.len());
                         packet.extend_from_slice(text.as_bytes());
                         packet.push(0); // Null terminator
                     }
@@ -1681,64 +1622,39 @@ pub fn build_packets_with_vars(script: &PacketScript, vars: &IndexMap<String, Js
                     if let Some(length) = length_opt {
                         let mut bytes = text.as_bytes().to_vec();
                         bytes.resize(*length, 0);
-                        println!("[BUILD] Packet {} Command {}: WRITE_STRING_LEN {} (var: {}) = \"{}\" {} ({} bytes, padded)", 
-                                 packet_idx + 1, idx + 1, var_name, var_name, text, length, length);
                         packet.extend_from_slice(&bytes[..*length]);
                     } else {
-                        println!("[BUILD] Packet {} Command {}: WRITE_STRING {} (var: {}) = \"{}\" ({} bytes + null terminator)", 
-                                 packet_idx + 1, idx + 1, var_name, var_name, text, text.len());
                         packet.extend_from_slice(text.as_bytes());
                         packet.push(0); // Null terminator
                     }
                 }
                 PacketCommand::WriteBytes(bytes) => {
-                    println!("[BUILD] Packet {} Command {}: WRITE_BYTES {} bytes (hex: {})", 
-                             packet_idx + 1, idx + 1, bytes.len(), hex::encode(bytes));
                     packet.extend_from_slice(bytes);
                 }
                 PacketCommand::WriteVarInt(value) => {
                     let encoded = encode_varint(*value);
-                    println!("[BUILD] Packet {} Command {}: WRITE_VARINT {} (bytes: {})",
-                             packet_idx + 1, idx + 1, value, hex::encode(&encoded));
                     packet.extend_from_slice(&encoded);
                 }
                 PacketCommand::WriteVarIntVar(var_name) => {
                     let value = get_u64_from_json(&resolve_var_value(vars, var_name)?)?;
                     let encoded = encode_varint(value);
-                    println!("[BUILD] Packet {} Command {}: WRITE_VARINT {} (var: {}) = {} (bytes: {})",
-                             packet_idx + 1, idx + 1, var_name, var_name, value, hex::encode(&encoded));
                     packet.extend_from_slice(&encoded);
                 }
                 PacketCommand::WriteVarIntLen => {
-                    println!("[BUILD] Packet {} Command {}: WRITE_VARINT PACKET_LEN placeholder inserted at {}",
-                             packet_idx + 1, idx + 1, packet.len());
                     varint_placeholders.push(packet.len());
                 }
                 PacketCommand::WriteIntLen(big_endian) => {
-                    println!("[BUILD] Packet {} Command {}: WRITE_INT{} PACKET_LEN placeholder inserted at {}",
-                             packet_idx + 1, idx + 1, if *big_endian { "_BE" } else { "" }, packet.len());
                     int_placeholders.push((packet.len(), *big_endian));
                     // Reserve 4 bytes for the length field
                     packet.extend_from_slice(&[0u8; 4]);
                 }
             }
-            println!("[BUILD] Packet {} size after command {}: {} bytes", packet_idx + 1, idx + 1, packet.len());
         }
 
-        println!("[BUILD] Packet {} construction complete: {} total bytes (hex: {})", 
-                 packet_idx + 1, packet.len(), hex::encode(&packet));
-        
         // Replace VarInt placeholders (in reverse order to maintain positions)
         for &placeholder_pos in varint_placeholders.iter().rev() {
             let suffix_len = packet.len() - placeholder_pos;
             let encoded = encode_varint(suffix_len as u64);
-            println!(
-                "[BUILD] Packet {} placeholder at {} replaced with VarInt {} (bytes: {})",
-                packet_idx + 1,
-                placeholder_pos,
-                suffix_len,
-                hex::encode(&encoded)
-            );
             packet.splice(placeholder_pos..placeholder_pos, encoded.iter().cloned());
         }
         
@@ -1753,24 +1669,12 @@ pub fn build_packets_with_vars(script: &PacketScript, vars: &IndexMap<String, Js
             } else {
                 (length as u32).to_le_bytes()
             };
-            println!(
-                "[BUILD] Packet {} placeholder at {} replaced with Int{} {} (bytes: {:02X} {:02X} {:02X} {:02X})",
-                packet_idx + 1,
-                placeholder_pos,
-                if big_endian { "_BE" } else { "" },
-                length,
-                bytes[0], bytes[1], bytes[2], bytes[3]
-            );
             packet[placeholder_pos..placeholder_pos + 4].copy_from_slice(&bytes);
         }
         
-            println!("[BUILD] Packet {} construction complete: {} payload bytes (hex: {})", 
-                     packet_idx + 1, packet.len(), hex::encode(&packet));
-            built_packets.push(packet);
+        built_packets.push(packet);
         }
     }
-
-    println!("[BUILD] All packets built: {} packet(s) total", built_packets.len());
     Ok(built_packets)
 }
 
@@ -1794,20 +1698,16 @@ pub fn parse_response(
     response_commands: &[ResponseCommand],
     response: &[u8],
 ) -> Result<(IndexMap<String, serde_json::Value>, usize)> {
-    println!("[PARSE] Starting response parsing: {} bytes received (hex: {})", 
-             response.len(), hex::encode(response));
     let mut vars = IndexMap::new();
     let mut cursor = 0;
 
-    for (idx, cmd) in response_commands.iter().enumerate() {
+    for (_idx, cmd) in response_commands.iter().enumerate() {
         match cmd {
             ResponseCommand::ReadByte(var) => {
                 if cursor >= response.len() {
                     anyhow::bail!("Insufficient data: need 1 byte, have {}", response.len() - cursor);
                 }
                 let value = response[cursor];
-                println!("[PARSE] Command {}: READ_BYTE {} -> 0x{:02X} ({}) at offset {}", 
-                         idx + 1, var, value, value, cursor);
                 vars.insert(var.clone(), serde_json::Value::Number(value.into()));
                 cursor += 1;
             }
@@ -1820,9 +1720,6 @@ pub fn parse_response(
                 } else {
                     u16::from_le_bytes([response[cursor], response[cursor + 1]])
                 };
-                println!("[PARSE] Command {}: READ_SHORT{} {} -> {} at offset {} (bytes: {:02X} {:02X})", 
-                         idx + 1, if *big_endian { "_BE" } else { "" }, var, value, cursor,
-                         response[cursor], response[cursor + 1]);
                 vars.insert(var.clone(), serde_json::Value::Number(value.into()));
                 cursor += 2;
             }
@@ -1845,16 +1742,12 @@ pub fn parse_response(
                         response[cursor + 3],
                     ])
                 };
-                println!("[PARSE] Command {}: READ_INT{} {} -> {} at offset {} (bytes: {:02X} {:02X} {:02X} {:02X})", 
-                         idx + 1, if *big_endian { "_BE" } else { "" }, var, value, cursor,
-                         response[cursor], response[cursor + 1], response[cursor + 2], response[cursor + 3]);
                 vars.insert(var.clone(), serde_json::Value::Number(value.into()));
                 cursor += 4;
             }
             ResponseCommand::ReadVarInt(var) => {
-                let start = cursor;
+                let _start = cursor;
                 let value = read_varint(response, &mut cursor)?;
-                println!("[PARSE] Command {}: READ_VARINT {} -> {} at offsets {}-{}", idx + 1, var, value, start, cursor);
                 vars.insert(var.clone(), serde_json::Value::Number(value.into()));
             }
             ResponseCommand::ReadString(var, length_opt) => {
@@ -1864,8 +1757,6 @@ pub fn parse_response(
                     }
                     let bytes = &response[cursor..cursor + length];
                     let text = String::from_utf8_lossy(bytes).trim_end_matches('\0').to_string();
-                    println!("[PARSE] Command {}: READ_STRING {} {} -> \"{}\" at offset {}", 
-                             idx + 1, var, length, text, cursor);
                     vars.insert(var.clone(), serde_json::Value::String(text));
                     cursor += length;
                 } else {
@@ -1879,8 +1770,6 @@ pub fn parse_response(
                 }
                 let bytes = &response[start..cursor];
                 let text = String::from_utf8_lossy(bytes).to_string();
-                println!("[PARSE] Command {}: READ_STRING_NULL {} -> \"{}\" at offset {} (length: {})", 
-                         idx + 1, var, text, start, text.len());
                 vars.insert(var.clone(), serde_json::Value::String(text));
                 if cursor < response.len() {
                     cursor += 1; // Skip null terminator
@@ -1890,7 +1779,6 @@ pub fn parse_response(
                 if cursor + count > response.len() {
                     anyhow::bail!("Insufficient data: need {} bytes, have {}", count, response.len() - cursor);
                 }
-                println!("[PARSE] Command {}: SKIP_BYTES {} at offset {}", idx + 1, count, cursor);
                 cursor += count;
             }
             ResponseCommand::ExpectByte(expected) => {
@@ -1898,8 +1786,6 @@ pub fn parse_response(
                     anyhow::bail!("Insufficient data: need 1 byte for EXPECT_BYTE, have {}", response.len() - cursor);
                 }
                 let actual = response[cursor];
-                println!("[PARSE] Command {}: EXPECT_BYTE 0x{:02X} at offset {} (got: 0x{:02X})", 
-                         idx + 1, expected, cursor, actual);
                 if actual != *expected {
                     anyhow::bail!("Expected byte 0x{:02X}, got 0x{:02X}", expected, actual);
                 }
@@ -1910,8 +1796,6 @@ pub fn parse_response(
                     anyhow::bail!("Insufficient data: need {} bytes for EXPECT_MAGIC, have {}", expected.len(), response.len() - cursor);
                 }
                 let actual = &response[cursor..cursor + expected.len()];
-                println!("[PARSE] Command {}: EXPECT_MAGIC {} at offset {} (got: {})", 
-                         idx + 1, hex::encode(expected), cursor, hex::encode(actual));
                 if actual != expected.as_slice() {
                     anyhow::bail!("Expected magic bytes {:?}, got {:?}", hex::encode(expected), hex::encode(actual));
                 }
@@ -1930,11 +1814,8 @@ pub fn parse_response(
                 anyhow::bail!("READ_BODY is only valid for HTTP responses, not binary responses");
             }
         }
-        println!("[PARSE] Cursor position after command {}: {} / {}", idx + 1, cursor, response.len());
     }
 
-    println!("[PARSE] Response parsing complete: {} variables extracted, {} bytes consumed", 
-             vars.len(), cursor);
     Ok((vars, cursor))
 }
 
@@ -1942,29 +1823,14 @@ pub fn execute_code_blocks(
     code_blocks: &[CodeBlock],
     parsed_vars: &mut IndexMap<String, JsonValue>,
 ) -> Result<IndexMap<String, JsonValue>> {
-    println!("[EXEC] Executing {} code block(s)...", code_blocks.len());
-    println!("[EXEC] Available parsed variables: {:?}", parsed_vars.keys().collect::<Vec<_>>());
     let mut code_vars = IndexMap::new();
     
-    for (block_idx, block) in code_blocks.iter().enumerate() {
-        println!("[EXEC] Executing code block {} with {} commands...", block_idx + 1, block.commands.len());
-        
-        for (cmd_idx, cmd) in block.commands.iter().enumerate() {
-            println!("[EXEC] Block {} Command {}: {:?}", block_idx + 1, cmd_idx + 1, cmd);
-            match execute_code_command(cmd, parsed_vars, &mut code_vars) {
-                Ok(()) => {
-                    println!("[EXEC] Block {} Command {} executed successfully", block_idx + 1, cmd_idx + 1);
-                }
-                Err(e) => {
-                    println!("[EXEC] Block {} Command {} failed: {}", block_idx + 1, cmd_idx + 1, e);
-                    return Err(e);
-                }
-            }
+    for (_block_idx, block) in code_blocks.iter().enumerate() {
+        for (_cmd_idx, cmd) in block.commands.iter().enumerate() {
+            execute_code_command(cmd, parsed_vars, &mut code_vars)?;
         }
     }
     
-    println!("[EXEC] Code execution complete: {} variables created: {:?}", 
-             code_vars.len(), code_vars.keys().collect::<Vec<_>>());
     Ok(code_vars)
 }
 
@@ -1974,14 +1840,12 @@ fn execute_code_command(
     code_vars: &mut IndexMap<String, JsonValue>,
 ) -> Result<()> {
     match cmd {
-        CodeCommand::DeclareVar { var_type, name, value } => {
+        CodeCommand::DeclareVar { name, value, .. } => {
             let evaluated = evaluate_expression(value, parsed_vars, code_vars)?;
-            println!("[EXEC] Declaring variable {} ({:?}) = {:?}", name, var_type, evaluated);
             code_vars.insert(name.clone(), evaluated);
         }
         CodeCommand::AssignVar { name, value } => {
             let evaluated = evaluate_expression(value, parsed_vars, code_vars)?;
-            println!("[EXEC] Assigning variable {} = {:?}", name, evaluated);
             // Update in code_vars if exists, otherwise create
             code_vars.insert(name.clone(), evaluated);
         }
@@ -1995,7 +1859,6 @@ fn execute_code_command(
                 .map(|s| JsonValue::String(s.to_string()))
                 .collect();
             
-            println!("[EXEC] SPLIT expression by '{}' -> {} parts", delimiter, parts.len());
             code_vars.insert(var_name.clone(), JsonValue::Array(parts));
         }
         CodeCommand::Replace { var_name, source_expr, search, replace } => {
@@ -2004,21 +1867,17 @@ fn execute_code_command(
                 .ok_or_else(|| anyhow::anyhow!("REPLACE source expression is not a string"))?;
             
             let result = source_str.replace(search, replace);
-            println!("[EXEC] REPLACE in expression: '{}' -> '{}'", search, replace);
             code_vars.insert(var_name.clone(), JsonValue::String(result));
         }
         CodeCommand::ForLoop { .. } => {
             // TODO: Implement FOR loop execution
-            println!("[EXEC] FOR loop execution not yet implemented");
         }
         CodeCommand::ForInArray { var_name, array_name, body } => {
-            println!("[EXEC] FOR {} IN {}: executing loop", var_name, array_name);
             let array_value = get_variable_value(array_name, parsed_vars, code_vars)?;
             let array = array_value.as_array()
                 .ok_or_else(|| anyhow::anyhow!("Variable '{}' is not an array", array_name))?;
             
-            for (idx, item) in array.iter().enumerate() {
-                println!("[EXEC] FOR loop iteration {}: {} = {:?}", idx, var_name, item);
+            for (_idx, item) in array.iter().enumerate() {
                 // Set the loop variable
                 code_vars.insert(var_name.clone(), item.clone());
                 
@@ -2036,17 +1895,14 @@ fn execute_code_command(
                 }
                 
                 if should_break {
-                    println!("[EXEC] FOR loop broken");
                     break;
                 }
             }
         }
         CodeCommand::IfStatement { condition, body, else_if, else_body } => {
-            println!("[EXEC] IF statement: evaluating condition");
             let condition_result = evaluate_condition(condition, parsed_vars, code_vars)?;
             
             if condition_result {
-                println!("[EXEC] IF condition true, executing body");
                 for body_cmd in body {
                     execute_code_command(body_cmd, parsed_vars, code_vars)?;
                 }
@@ -2055,7 +1911,6 @@ fn execute_code_command(
                 let mut matched = false;
                 for (else_cond, else_body_cmds) in else_if {
                     if evaluate_condition(else_cond, parsed_vars, code_vars)? {
-                        println!("[EXEC] ELSE-IF condition true, executing body");
                         for body_cmd in else_body_cmds {
                             execute_code_command(body_cmd, parsed_vars, code_vars)?;
                         }
@@ -2067,7 +1922,6 @@ fn execute_code_command(
                 // Execute else body if no else-if matched
                 if !matched {
                     if let Some(else_body_cmds) = else_body {
-                        println!("[EXEC] IF condition false, executing else body");
                         for body_cmd in else_body_cmds {
                             execute_code_command(body_cmd, parsed_vars, code_vars)?;
                         }
@@ -2076,16 +1930,13 @@ fn execute_code_command(
             }
         }
         CodeCommand::Break => {
-            println!("[EXEC] BREAK encountered");
             return Err(anyhow::anyhow!("BREAK"));
         }
         CodeCommand::ExecutePacketCommand(_) => {
             // TODO: Nested packet command execution
-            println!("[EXEC] Nested packet command execution not yet implemented");
         }
         CodeCommand::ExecuteResponseCommand(_) => {
             // TODO: Nested response command execution
-            println!("[EXEC] Nested response command execution not yet implemented");
         }
     }
     Ok(())

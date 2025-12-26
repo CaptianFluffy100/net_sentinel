@@ -1,4 +1,5 @@
 use crate::models::{GameServer, Protocol, GameServerTestResult, GameServerError};
+use crate::out;
 use crate::packet_parser::{build_packets_with_vars, parse_response, parse_script, execute_code_blocks, OutputBlock, OutputCommand, OutputStatus, PacketResponsePair, prepare_http_request_with_vars, parse_http_response};
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -6,20 +7,14 @@ use indexmap::IndexMap;
 use std::time::Instant;
 
 pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
-    println!("[CHECK] Starting game server check for {} ({:?}://{}:{})", 
-             server.name, server.protocol, server.address, server.port);
     let start = Instant::now();
 
     // Parse the pseudo-code script
-    println!("[CHECK] Step 1: Parsing pseudo-code script...");
     let resolved_code = replace_placeholders(&server.pseudo_code, server);
     let script = match parse_script(&resolved_code) {
-        Ok(s) => {
-            println!("[CHECK] Script parsed successfully");
-            s
-        },
+        Ok(s) => s,
         Err(e) => {
-            println!("[CHECK] Script parsing failed: {}", e);
+            out::error("gameserver_check", &format!("Script parsing failed for {}: {}", server.name, e));
             return GameServerTestResult {
                 success: false,
                 response_time_ms: 0,
@@ -38,9 +33,6 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
     };
 
     // Execute pairs sequentially: build packets with current variables, send, receive response, parse response
-    println!("[CHECK] Step 2: Executing {} pair(s) sequentially via {:?} to {}:{} (timeout: {}ms)...", 
-             script.pairs.len(), server.protocol, server.address, server.port, server.timeout_ms);
-    
     let mut all_responses = Vec::new();
     let mut all_parsed_vars = IndexMap::new();
     let mut last_error: Option<GameServerError> = None;
@@ -51,7 +43,6 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
             // Create UDP socket once and reuse for all pairs
             use tokio::net::UdpSocket;
             let addr = format!("{}:{}", server.address, server.port);
-            println!("[UDP] Binding UDP socket...");
             let socket = match UdpSocket::bind("0.0.0.0:0").await {
                 Ok(s) => s,
                 Err(e) => {
@@ -71,19 +62,12 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                     };
                 }
             };
-            println!("[UDP] Socket created, will be reused for all {} pair(s)", script.pairs.len());
             
             // Execute all pairs with the same socket, parsing responses immediately
             for (pair_idx, pair) in script.pairs.iter().enumerate() {
-                println!("[CHECK] Executing pair {} of {}...", pair_idx + 1, script.pairs.len());
-                
                 // Build packets for this pair with current variables (just before sending)
-                println!("[BUILD] Building packets for pair {} with {} variable(s)...", pair_idx + 1, all_parsed_vars.len());
                 let pair_packets = match build_packets_for_pair(pair, &all_parsed_vars) {
-                    Ok(packets) => {
-                        println!("[BUILD] Built {} packet(s) for pair {}", packets.len(), pair_idx + 1);
-                        packets
-                    },
+                    Ok(packets) => packets,
                     Err(e) => {
                         last_error = Some(GameServerError {
                             error_type: "BuildError".to_string(),
@@ -102,16 +86,13 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                             
                             // Parse the response immediately so variables are available for next pair
                             if !pair.response.is_empty() {
-                                println!("[CHECK] Parsing pair {} response with {} response commands...", pair_idx + 1, pair.response.len());
                                 match parse_response(&pair.response, &response) {
                                     Ok((vars, _bytes_read)) => {
-                                        println!("[CHECK] Pair {} response parsing successful: {} variables extracted", 
-                                                 pair_idx + 1, vars.len());
                                         // Merge variables into all_parsed_vars (later pairs can override earlier ones)
                                         all_parsed_vars.extend(vars);
                                     }
                                     Err(e) => {
-                                        println!("[CHECK] Pair {} response parsing failed: {}", pair_idx + 1, e);
+                                        out::error("gameserver_check", &format!("Pair {} response parsing failed: {}", pair_idx + 1, e));
                                         last_error = Some(GameServerError {
                                             error_type: "ParseError".to_string(),
                                             message: format!("Pair {}: {}", pair_idx + 1, e),
@@ -153,23 +134,18 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
             let mut stream: Option<TcpStream> = None;
             
             for (pair_idx, pair) in script.pairs.iter().enumerate() {
-                println!("[CHECK] Executing pair {} of {} ({} packet(s))...", pair_idx + 1, script.pairs.len(), pair.packets.len());
-                
                 // Check if we need to close connection before this pair
                 if pair.close_connection_before {
                     if stream.take().is_some() {
-                        println!("[TCP] Closing connection before pair {}", pair_idx + 1);
                         // Connection is closed when dropped
                     }
                 }
                 
                 // Check if we need to open a new connection
                 if stream.is_none() {
-                    println!("[TCP] Connecting to {} (timeout: {}ms)...", addr, server.timeout_ms);
                     match timeout(timeout_duration, TcpStream::connect(&addr)).await {
                         Ok(Ok(s)) => {
                             stream = Some(s);
-                            println!("[TCP] Connected successfully");
                         },
                         Ok(Err(e)) => {
                             last_error = Some(GameServerError {
@@ -191,12 +167,8 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                 }
                 
                 // Build packets for this pair with current variables (just before sending)
-                println!("[BUILD] Building packets for pair {} with {} variable(s)...", pair_idx + 1, all_parsed_vars.len());
                 let pair_packets = match build_packets_for_pair(pair, &all_parsed_vars) {
-                    Ok(packets) => {
-                        println!("[BUILD] Built {} packet(s) for pair {}", packets.len(), pair_idx + 1);
-                        packets
-                    },
+                    Ok(packets) => packets,
                     Err(e) => {
                         last_error = Some(GameServerError {
                             error_type: "BuildError".to_string(),
@@ -211,19 +183,15 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                 match stream.as_mut() {
                     Some(s) => {
                         for (packet_in_pair_idx, packet) in pair_packets.iter().enumerate() {
-                            println!("[TCP] Sending packet {} of pair {}...", 
-                                     packet_in_pair_idx + 1, pair_idx + 1);
                             match send_packet_tcp_no_response(s, packet).await {
-                                Ok(_) => {
-                                    println!("[TCP] Packet {} of pair {} sent successfully", packet_in_pair_idx + 1, pair_idx + 1);
-                                },
+                                Ok(_) => {},
                                 Err(e) => {
                                     last_error = Some(GameServerError {
                                         error_type: "NetworkError".to_string(),
                                         message: format!("Failed to send packet {} of pair {}: {}", packet_in_pair_idx + 1, pair_idx + 1, e),
                                         line: None,
                                     });
-                                    stream = None; // Connection is likely broken
+                                                    stream = None; // Connection is likely broken
                                     break;
                                 }
                             }
@@ -232,23 +200,18 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                         // After all packets are sent, wait for response (only if there's a response defined)
                         if !pair.response.is_empty() {
                             if let Some(s) = stream.as_mut() {
-                                println!("[TCP] All packets for pair {} sent, waiting for response...", pair_idx + 1);
                                 match receive_packet_tcp(s, timeout_duration).await {
                                     Ok(response) => {
-                                        println!("[TCP] Response received: {} bytes", response.len());
                                         all_responses.push(response.clone());
                                         
                                         // Parse the response immediately so variables are available for next pair
-                                        println!("[CHECK] Parsing pair {} response with {} response commands...", pair_idx + 1, pair.response.len());
                                         match parse_response(&pair.response, &response) {
                                             Ok((vars, _bytes_read)) => {
-                                                println!("[CHECK] Pair {} response parsing successful: {} variables extracted", 
-                                                         pair_idx + 1, vars.len());
                                                 // Merge variables into all_parsed_vars (later pairs can override earlier ones)
                                                 all_parsed_vars.extend(vars);
                                             }
                                             Err(e) => {
-                                                println!("[CHECK] Pair {} response parsing failed: {}", pair_idx + 1, e);
+                                                out::error("gameserver_check", &format!("Pair {} response parsing failed: {}", pair_idx + 1, e));
                                                 last_error = Some(GameServerError {
                                                     error_type: "ParseError".to_string(),
                                                     message: format!("Pair {}: {}", pair_idx + 1, e),
@@ -281,11 +244,6 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                     }
                 }
             }
-            
-            // Close connection if still open
-            if stream.is_some() {
-                println!("[TCP] All pairs complete, closing connection");
-            }
             // TCP parsing is done inline above
         },
         Protocol::Http | Protocol::Https => {
@@ -299,8 +257,6 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
             } else {
                 format!("{}://{}:{}", scheme, server.address, server.port)
             };
-            
-            println!("[HTTP] Using base URL: {}", base_url);
             
             let client = match reqwest::Client::builder()
                 .timeout(std::time::Duration::from_millis(server.timeout_ms))
@@ -328,12 +284,9 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
             };
             
             for (pair_idx, pair) in script.pairs.iter().enumerate() {
-                println!("[CHECK] Executing pair {} of {}...", pair_idx + 1, script.pairs.len());
-                
                 // Check if this is an HTTP request or binary packets
                 if let Some(http_req) = &pair.http_request {
                     // Build HTTP request with current variables
-                    println!("[BUILD] Preparing HTTP request for pair {} with {} variable(s)...", pair_idx + 1, all_parsed_vars.len());
                     let prepared_req = match prepare_http_request_with_vars(http_req, &all_parsed_vars) {
                         Ok(req) => req,
                         Err(e) => {
@@ -369,10 +322,6 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                     }
                     let url = url.to_string();
                     
-                    println!("[HTTP] Sending {} request to {}", prepared_req.method, url);
-                    println!("[HTTP] Request details: method={}, path={}, params={:?}, headers={:?}", 
-                             prepared_req.method, prepared_req.path, prepared_req.params, prepared_req.headers);
-                    
                     // Build request
                     let request_builder = match prepared_req.method.as_str() {
                         "GET" => client.get(&url),
@@ -395,11 +344,8 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                         if key.eq_ignore_ascii_case("Authorization") && value.starts_with("Bearer ") {
                             if !has_authorization {
                                 let token = value.strip_prefix("Bearer ").unwrap_or(value);
-                                println!("[HTTP] Adding Authorization header (Bearer token): {}", token);
                                 request_builder = request_builder.bearer_auth(token);
                                 has_authorization = true;
-                            } else {
-                                println!("[HTTP] Skipping duplicate Authorization header");
                             }
                         } else {
                             if key.eq_ignore_ascii_case("User-Agent") {
@@ -407,17 +353,14 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                             }
                             // Skip duplicate Authorization headers
                             if key.eq_ignore_ascii_case("Authorization") && has_authorization {
-                                println!("[HTTP] Skipping duplicate Authorization header");
                                 continue;
                             }
-                            println!("[HTTP] Adding header: {} = {}", key, value);
                             request_builder = request_builder.header(key, value);
                         }
                     }
                     
                     // Add default User-Agent if not provided (some APIs require it)
                     if !has_user_agent {
-                        println!("[HTTP] Adding default User-Agent header");
                         request_builder = request_builder.header("User-Agent", "NetSentinel/1.0");
                     }
                     
@@ -444,8 +387,6 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                     };
                     
                     let status_code = response.status().as_u16();
-                    println!("[HTTP] Response status: {}", status_code);
-                    println!("[HTTP] Response headers: {:?}", response.headers());
                     let headers = response.headers().clone();
                     let body_bytes = match response.bytes().await {
                         Ok(bytes) => bytes.to_vec(),
@@ -463,14 +404,12 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
                     
                     // Parse HTTP response
                     if !pair.response.is_empty() {
-                        println!("[CHECK] Parsing pair {} HTTP response with {} response commands...", pair_idx + 1, pair.response.len());
                         match parse_http_response(&pair.response, status_code, &headers, &body_bytes) {
                             Ok(vars) => {
-                                println!("[CHECK] Pair {} response parsing successful: {} variables extracted", pair_idx + 1, vars.len());
                                 all_parsed_vars.extend(vars);
                             }
                             Err(e) => {
-                                println!("[CHECK] Pair {} response parsing failed: {}", pair_idx + 1, e);
+                                out::error("gameserver_check", &format!("Pair {} response parsing failed: {}", pair_idx + 1, e));
                                 last_error = Some(GameServerError {
                                     error_type: "ParseError".to_string(),
                                     message: format!("Pair {}: {}", pair_idx + 1, e),
@@ -504,18 +443,13 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
     // Execute code blocks (variables from CODE_START/CODE_END)
     // Do this even if there's an error, so variables are available for error output
     let code_variables = match execute_code_blocks(&script.code_blocks, &mut all_parsed_vars) {
-        Ok(vars) => {
-            println!("[CHECK] Code blocks executed: {} variables created", vars.len());
-            vars
-        }
+        Ok(vars) => vars,
         Err(e) => {
-            println!("[CHECK] Code block execution failed: {}", e);
+            out::error("gameserver_check", &format!("Code block execution failed: {}", e));
             // Continue anyway, but log the error
             IndexMap::new()
         }
     };
-
-    let code_vars_count = code_variables.len();
 
     // Merge code variables into parsed vars for output block evaluation
     // Code variables can override parsed vars if they have the same name
@@ -544,8 +478,6 @@ pub async fn check_game_server(server: &GameServer) -> GameServerTestResult {
     let parsed_values: serde_json::Value = all_parsed_vars.clone().into_iter().collect();
     let variables: serde_json::Value = code_variables.into_iter().collect();
 
-    println!("[CHECK] All pairs executed successfully: {} parsed values, {} code variables in {}ms", 
-             all_parsed_vars.len(), code_vars_count, response_time_ms);
     GameServerTestResult {
         success: true,
         response_time_ms,
@@ -568,32 +500,21 @@ async fn send_single_udp_packet(
     use tokio::time::{timeout, Duration};
 
     let addr = format!("{}:{}", address, port);
-    println!("[UDP] Binding UDP socket...");
     let socket = UdpSocket::bind("0.0.0.0:0").await
         .context("Failed to create UDP socket")?;
 
-    println!("[UDP] Sending packet ({} bytes) to {}...", packet.len(), addr);
     socket
         .send_to(packet, &addr)
         .await
         .context("Failed to send UDP packet")?;
-    println!("[UDP] Packet sent successfully, waiting for response (timeout: {}ms)...", timeout_ms);
 
     let mut buf = vec![0u8; 16384];
     let timeout_duration = Duration::from_millis(timeout_ms);
 
     match timeout(timeout_duration, socket.recv_from(&mut buf)).await {
-        Ok(Ok((size, _))) => {
-            println!("[UDP] Response received: {} bytes", size);
-            Ok(buf[..size].to_vec())
-        },
-        Ok(Err(e)) => {
-            Err(anyhow::anyhow!("Failed to receive UDP response: {}", e))
-        },
-        Err(_) => {
-            println!("[UDP] Request timed out after {}ms", timeout_ms);
-            Err(anyhow::anyhow!("UDP request timed out after {}ms", timeout_ms))
-        },
+        Ok(Ok((size, _))) => Ok(buf[..size].to_vec()),
+        Ok(Err(e)) => Err(anyhow::anyhow!("Failed to receive UDP response: {}", e)),
+        Err(_) => Err(anyhow::anyhow!("UDP request timed out after {}ms", timeout_ms)),
     }
 }
 
@@ -602,12 +523,10 @@ async fn send_packet_udp_no_response(
     addr: &str,
     packet: &[u8],
 ) -> Result<()> {
-    println!("[UDP] Sending packet ({} bytes) to {}...", packet.len(), addr);
     socket
         .send_to(packet, addr)
         .await
         .context("Failed to send UDP packet")?;
-    println!("[UDP] Packet sent successfully");
     Ok(())
 }
 
@@ -617,22 +536,13 @@ async fn receive_packet_udp(
 ) -> Result<Vec<u8>> {
     use tokio::time::{timeout, Duration};
 
-    println!("[UDP] Waiting for response (timeout: {}ms)...", timeout_ms);
     let mut buf = vec![0u8; 16384];
     let timeout_duration = Duration::from_millis(timeout_ms);
 
     match timeout(timeout_duration, socket.recv_from(&mut buf)).await {
-        Ok(Ok((size, _))) => {
-            println!("[UDP] Response received: {} bytes", size);
-            Ok(buf[..size].to_vec())
-        },
-        Ok(Err(e)) => {
-            Err(anyhow::anyhow!("Failed to receive UDP response: {}", e))
-        },
-        Err(_) => {
-            println!("[UDP] Request timed out after {}ms", timeout_ms);
-            Err(anyhow::anyhow!("UDP request timed out after {}ms", timeout_ms))
-        },
+        Ok(Ok((size, _))) => Ok(buf[..size].to_vec()),
+        Ok(Err(e)) => Err(anyhow::anyhow!("Failed to receive UDP response: {}", e)),
+        Err(_) => Err(anyhow::anyhow!("UDP request timed out after {}ms", timeout_ms)),
     }
 }
 
@@ -652,11 +562,9 @@ async fn send_packet_tcp_no_response(
 ) -> Result<()> {
     use tokio::io::AsyncWriteExt;
 
-    println!("[TCP] Sending packet ({} bytes)...", packet.len());
     stream.write_all(packet)
         .await
         .context("Failed to write packet")?;
-    println!("[TCP] Packet sent successfully");
     Ok(())
 }
 
@@ -667,13 +575,11 @@ async fn receive_packet_tcp(
     use tokio::io::AsyncReadExt;
     use tokio::time::timeout;
 
-    println!("[TCP] Waiting for response...");
     let mut buf = vec![0u8; 16384];
     let size = timeout(timeout_duration, stream.read(&mut buf))
         .await
         .context("Read timeout")?
         .context("Failed to read response")?;
-    println!("[TCP] Response received: {} bytes", size);
     Ok(buf[..size].to_vec())
 }
 
@@ -696,38 +602,24 @@ async fn send_udp_packets(
     use tokio::time::{timeout, Duration};
 
     let addr = format!("{}:{}", address, port);
-    println!("[UDP] Binding UDP socket...");
     let socket = UdpSocket::bind("0.0.0.0:0").await
         .context("Failed to create UDP socket")?;
 
     // Send all packets sequentially
     for (idx, packet) in packets.iter().enumerate() {
-        println!("[UDP] Sending packet {} of {} ({} bytes) to {}...", idx + 1, packets.len(), packet.len(), addr);
         socket
             .send_to(packet, &addr)
             .await
             .context(format!("Failed to send UDP packet {}", idx + 1))?;
-        println!("[UDP] Packet {} sent successfully", idx + 1);
     }
-    
-    println!("[UDP] All packets sent, waiting for response (timeout: {}ms)...", timeout_ms);
 
     let mut buf = vec![0u8; 16384];
     let timeout_duration = Duration::from_millis(timeout_ms);
 
     match timeout(timeout_duration, socket.recv_from(&mut buf)).await {
-        Ok(Ok((size, _))) => {
-            println!("[UDP] Response received: {} bytes", size);
-            Ok(buf[..size].to_vec())
-        },
-        Ok(Err(e)) => {
-            println!("[UDP] Failed to receive response: {}", e);
-            Err(anyhow::anyhow!("Failed to receive UDP response: {}", e))
-        },
-        Err(_) => {
-            println!("[UDP] Request timed out after {}ms", timeout_ms);
-            Err(anyhow::anyhow!("UDP request timed out after {}ms", timeout_ms))
-        },
+        Ok(Ok((size, _))) => Ok(buf[..size].to_vec()),
+        Ok(Err(e)) => Err(anyhow::anyhow!("Failed to receive UDP response: {}", e)),
+        Err(_) => Err(anyhow::anyhow!("UDP request timed out after {}ms", timeout_ms)),
     }
 }
 
@@ -744,19 +636,15 @@ async fn send_single_tcp_packet(
     let addr = format!("{}:{}", address, port);
     let timeout_duration = Duration::from_millis(timeout_ms);
 
-    println!("[TCP] Connecting to {} (timeout: {}ms)...", addr, timeout_ms);
     let mut stream = timeout(timeout_duration, TcpStream::connect(&addr))
         .await
         .context("Connection timeout")?
         .context("Failed to connect to server")?;
-    println!("[TCP] Connected successfully");
 
-    println!("[TCP] Sending packet ({} bytes)...", packet.len());
     timeout(timeout_duration, stream.write_all(packet))
         .await
         .context("Send timeout")?
         .context("Failed to write packet")?;
-    println!("[TCP] Packet sent successfully, waiting for response (timeout: {}ms)...", timeout_ms);
 
     // Read response
     let mut buf = vec![0u8; 16384];
@@ -765,7 +653,6 @@ async fn send_single_tcp_packet(
         .context("Receive timeout")?
         .context("Failed to read response")?;
 
-    println!("[TCP] Response received: {} bytes", size);
     Ok(buf[..size].to_vec())
 }
 
@@ -780,7 +667,7 @@ fn evaluate_output_labels(
     match process_output_blocks(&script.output_blocks, status, vars, server, error) {
         Ok(lines) => lines,
         Err(e) => {
-            println!("[CHECK] Output formatting error: {}", e);
+            out::error("gameserver_check", &format!("Output formatting error: {}", e));
             Vec::new()
         }
     }
@@ -807,36 +694,14 @@ fn evaluate_output_block(
     error: Option<&GameServerError>,
 ) -> Result<Vec<String>> {
     let mut results = Vec::new();
-    println!("[CHECK] Evaluating output block with {} commands", block.commands.len());
     
-    // Print all current variables for debugging
-    println!("[CHECK] Variables before processing output block: {:?}", 
-             vars.keys().collect::<Vec<_>>());
-    
-    for (idx, command) in block.commands.iter().enumerate() {
+    for (_idx, command) in block.commands.iter().enumerate() {
         match command {
             OutputCommand::JsonOutput(var) => {
-                println!("[CHECK] Command {}: JSON_OUTPUT {}", idx + 1, var);
                 handle_json_output(var, vars)?;
-                // Print variable after JSON_OUTPUT
-                if let Some(value) = vars.get(var) {
-                    println!("[CHECK] Variable {} after JSON_OUTPUT: type={:?}, preview={:?}", 
-                             var, 
-                             if value.is_string() { "String" } 
-                             else if value.is_object() { "Object" } 
-                             else if value.is_array() { "Array" } 
-                             else { "Other" },
-                             if value.is_string() { 
-                                 value.as_str().map(|s| if s.len() > 50 { format!("{}...", &s[..50]) } else { s.to_string() })
-                             } else { 
-                                 Some(format!("{}", value))
-                             });
-                }
             },
             OutputCommand::Return(template) => {
-                println!("[CHECK] Command {}: RETURN with template: {}", idx + 1, template);
                 let result = format_return(template, vars, server, error);
-                println!("[CHECK] RETURN resolved to: {}", result);
                 results.push(result);
             }
         }
@@ -845,35 +710,15 @@ fn evaluate_output_block(
 }
 
 fn handle_json_output(var: &str, vars: &mut IndexMap<String, Value>) -> Result<()> {
-    println!("[CHECK] JSON_OUTPUT: Looking for variable '{}'", var);
-    println!("[CHECK] JSON_OUTPUT: Available variables: {:?}", vars.keys().collect::<Vec<_>>());
-    
     if let Some(value) = vars.get(var).cloned() {
-        println!("[CHECK] JSON_OUTPUT {}: Found variable, type: {:?}", var, 
-                 if value.is_string() { "String" } 
-                 else if value.is_object() { "Object" } 
-                 else { "Other" });
-        
         if let Some(text) = value.as_str() {
-            println!("[CHECK] JSON_OUTPUT {}: Parsing JSON string (length: {}): {}", 
-                     var, text.len(), 
-                     if text.len() > 100 { format!("{}...", &text[..100]) } else { text.to_string() });
-            
             // Parse JSON string into JSON object
             let parsed: Value = serde_json::from_str(text)
                 .with_context(|| format!("Failed to parse JSON for variable {}: {}", var, 
                     if text.len() > 200 { format!("{}...", &text[..200]) } else { text.to_string() }))?;
             
-            vars.insert(var.to_string(), parsed.clone());
-            println!("[CHECK] JSON_OUTPUT {}: Successfully parsed JSON string into object: {}", 
-                     var, parsed);
-        } else {
-            // Already a JSON object, no need to parse
-            println!("[CHECK] JSON_OUTPUT {}: Variable is already a JSON object: {}", var, value);
+            vars.insert(var.to_string(), parsed);
         }
-    } else {
-        println!("[CHECK] JSON_OUTPUT {}: ERROR - variable not found in vars!", var);
-        println!("[CHECK] JSON_OUTPUT: Available variable names: {:?}", vars.keys().collect::<Vec<_>>());
     }
     Ok(())
 }
@@ -884,9 +729,6 @@ fn format_return(
     server: &GameServer,
     error: Option<&GameServerError>,
 ) -> String {
-    println!("[CHECK] format_return: Processing template: '{}'", template);
-    println!("[CHECK] format_return: Available variables: {:?}", vars.keys().collect::<Vec<_>>());
-    
     // Replace error placeholders first
     let mut template = template.to_string();
     if let Some(err) = error {
@@ -911,7 +753,6 @@ fn format_return(
         // Entire template is a variable name, output as "varname=value"
         if let Some(value) = resolve_var_path(template_str, vars) {
             let result = format!("{}=\"{}\"", template_str, value);
-            println!("[CHECK] format_return: Entire template is variable '{}', result: '{}'", template_str, result);
             return result;
         }
     }
@@ -937,7 +778,6 @@ fn format_return(
                     // Try resolving as a variable path (supports dot notation like JSON_PAYLOAD.version.protocol)
                     match resolve_var_path(&current_token, vars) {
                         Some(value) => {
-                            println!("[CHECK] format_return: Resolved path '{}' to '{}'", current_token, value);
                             result.push_str(&value);
                         },
                         None => {
@@ -963,7 +803,6 @@ fn format_return(
         if is_valid_var_name(&current_token) || current_token.contains('.') {
             match resolve_var_path(&current_token, vars) {
                 Some(value) => {
-                    println!("[CHECK] format_return: Resolved path '{}' to '{}'", current_token, value);
                     result.push_str(&value);
                 },
                 None => {
@@ -983,7 +822,6 @@ fn format_return(
         result = format!("\"{}\"", result);
     }
     
-    println!("[CHECK] format_return: Final result: '{}'", result);
     result
 }
 
@@ -1010,14 +848,8 @@ fn resolve_token(token: &str, vars: &IndexMap<String, Value>, server: &GameServe
         other => {
             // Try to resolve as a variable path (supports dot notation)
             match resolve_var_path(other, vars) {
-                Some(value) => {
-                    println!("[CHECK] Resolved token '{}' to '{}'", other, value);
-                    value
-                }
-                None => {
-                    println!("[CHECK] Token '{}' not found in vars, returning as-is", other);
-                    other.to_string()
-                }
+                Some(value) => value,
+                None => other.to_string()
             }
         }
     }

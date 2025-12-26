@@ -2,6 +2,7 @@ mod api;
 mod code_server;
 mod db;
 mod models;
+mod out;
 mod packet_parser;
 mod gameserver_check;
 
@@ -43,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Run it
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3100").await?;
-    println!("Net Sentinel running on http://localhost:3100");
+    out::info("main", &format!("Net Sentinel running on http://localhost:3100"));
     axum::serve(listener, app).await?;
 
     Ok(())
@@ -206,6 +207,7 @@ async fn check_website_direct(url: &str, direct_connect_url: Option<&str>) -> bo
 }
 
 async fn metrics_handler(Extension(state): Extension<Arc<AppState>>) -> Response {
+    let start = std::time::Instant::now();
     let isps = match api::list_isps_internal(&state.store).await {
         Ok(isps) => isps,
         Err(_) => {
@@ -327,7 +329,10 @@ async fn metrics_handler(Extension(state): Extension<Arc<AppState>>) -> Response
         std::collections::HashMap::new()
     };
 
-    build_metrics_response(&isps, internet_up, &websites, &website_results, &game_servers, &game_server_results)
+    let response = build_metrics_response(&isps, internet_up, &websites, &website_results, &game_servers, &game_server_results);
+    let elapsed = start.elapsed();
+    out::info("metrics", &format!("Processed /metrics endpoint in {:.2}ms", elapsed.as_secs_f64() * 1000.0));
+    response
 }
 
 fn parse_return_output(output: &str) -> Vec<(String, String)> {

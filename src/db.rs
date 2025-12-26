@@ -1,4 +1,5 @@
 use crate::models::{Isp, Website, GameServer};
+use crate::out;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -56,7 +57,7 @@ impl JsonStore {
             Ok(db) => db,
             Err(e) => {
                 // If deserialization fails (e.g., missing fields), try to preserve ISPs
-                eprintln!("Warning: Database deserialization error: {}. Attempting recovery...", e);
+                out::warning("db", &format!("Database deserialization error: {}. Attempting recovery...", e));
                 let mut db = Database::default();
                 // Try to extract ISPs and other data from the partial JSON
                 if let Ok(partial) = serde_json::from_str::<serde_json::Value>(&content) {
@@ -129,8 +130,8 @@ pub fn get_database_path() -> Result<PathBuf> {
 
 pub async fn init_db() -> Result<JsonStore> {
     let db_path = get_database_path()?;
-    println!("Using JSON database at: {}", db_path.display());
+    out::info("db", &format!("Using JSON database at: {}", db_path.display()));
     let store = JsonStore::new(db_path)?;
-    println!("Database initialized successfully");
+    out::ok("db", "Database initialized successfully");
     Ok(store)
 }

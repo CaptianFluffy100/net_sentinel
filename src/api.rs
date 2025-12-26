@@ -418,28 +418,7 @@ pub async fn test_game_server_config(
         pseudo_code: create_game_server.pseudo_code.clone(),
     };
 
-    println!("===================== Game Server Test =====================");
-    println!(
-        "Testing {} ({:?}): {}:{} timeout {}ms",
-        server.name, server.protocol, server.address, server.port, server.timeout_ms
-    );
-    println!("Pseudo-code payload:\n{}", server.pseudo_code);
-
     let result = gameserver_check::check_game_server(&server).await;
-
-    println!("Result success: {}", result.success);
-    if let Some(raw) = &result.raw_response {
-        println!("Raw response: {}", raw);
-    }
-    println!("Parsed values: {}", result.parsed_values);
-    if let Some(error) = &result.error {
-        println!(
-            "Error: {} (line {:?})",
-            error.message,
-            error.line.as_ref().map(|line| line.to_string())
-        );
-    }
-    println!("===========================================================");
 
     (StatusCode::OK, Json(result)).into_response()
 }
