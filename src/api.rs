@@ -275,14 +275,22 @@ pub async fn create_game_server(
     let pseudo_code = create_game_server.pseudo_code.clone();
 
     let result = state.store.write(|db| {
-        // Check for duplicate name (case-insensitive)
-        if db.game_servers.iter().any(|server| {
+        // Check for duplicate name (case-insensitive) and replace if exists
+        let existing_index = db.game_servers.iter().position(|server| {
             server.name.trim().eq_ignore_ascii_case(name.trim())
-        }) {
-            return Err(anyhow::anyhow!("Game server with the same name already exists"));
-        }
+        });
+        
+        let (id, was_replaced) = if let Some(index) = existing_index {
+            // Reuse the existing ID to preserve references
+            let existing_id = db.game_servers[index].id;
+            // Remove the old game server
+            db.game_servers.remove(index);
+            (existing_id, true)
+        } else {
+            // Create a new ID for a new game server
+            (db.get_next_id(), false)
+        };
 
-        let id = db.get_next_id();
         let game_server = GameServer {
             id,
             name: name.clone(),
@@ -294,23 +302,22 @@ pub async fn create_game_server(
         };
         let game_server_clone = game_server.clone();
         db.game_servers.push(game_server);
-        Ok(game_server_clone)
+        Ok((game_server_clone, was_replaced))
     }).await;
 
     match result {
-        Ok(game_server) => {
-            (StatusCode::CREATED, Json(game_server)).into_response()
+        Ok((game_server, was_replaced)) => {
+            let status = if was_replaced {
+                StatusCode::OK  // 200 OK for replacement
+            } else {
+                StatusCode::CREATED  // 201 Created for new server
+            };
+            (status, Json(game_server)).into_response()
         }
         Err(e) => {
-            let error_msg = e.to_string();
-            let status = if error_msg.contains("already exists") {
-                StatusCode::CONFLICT
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
             (
-                status,
-                Json(serde_json::json!({"error": error_msg})),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
             )
                 .into_response()
         }

@@ -3,7 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Net Sentinel - ISP Monitor</title>
+    <title>Net Sentinel - Network Monitor</title>
+    <!-- Monaco Editor -->
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
     <style>
         * {
             margin: 0;
@@ -20,7 +22,7 @@
         }
 
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
         }
 
@@ -39,6 +41,44 @@
         .version {
             color: #94a3b8;
             font-size: 0.9rem;
+        }
+
+        /* Tab Navigation */
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 25px;
+            border-bottom: 2px solid #1e293b;
+        }
+
+        .tab-button {
+            background: transparent;
+            color: #94a3b8;
+            border: none;
+            padding: 12px 24px;
+            font-size: 1rem;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+
+        .tab-button:hover {
+            color: #60a5fa;
+            background: rgba(96, 165, 250, 0.1);
+        }
+
+        .tab-button.active {
+            color: #60a5fa;
+            border-bottom-color: #60a5fa;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
         }
 
         .section {
@@ -66,7 +106,9 @@
             font-weight: 500;
         }
 
-        input[type="text"] {
+        input[type="text"],
+        input[type="number"],
+        select {
             width: 100%;
             padding: 12px;
             background: #0f172a;
@@ -77,7 +119,9 @@
             transition: border-color 0.2s;
         }
 
-        input[type="text"]:focus {
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        select:focus {
             outline: none;
             border-color: #60a5fa;
         }
@@ -112,11 +156,35 @@
             background: #dc2626;
         }
 
-        .isp-list {
+        button.edit {
+            background: #f59e0b;
+            padding: 8px 16px;
+            font-size: 0.9rem;
+        }
+
+        button.edit:hover {
+            background: #d97706;
+        }
+
+        button.test {
+            background: #10b981;
+            padding: 8px 16px;
+            font-size: 0.9rem;
+        }
+
+        button.test:hover {
+            background: #059669;
+        }
+
+        .isp-list,
+        .website-list,
+        .gameserver-list {
             margin-top: 20px;
         }
 
-        .isp-item {
+        .isp-item,
+        .website-item,
+        .gameserver-item {
             background: #0f172a;
             padding: 15px;
             border-radius: 6px;
@@ -127,20 +195,25 @@
             border: 1px solid #334155;
         }
 
-        .isp-info {
+        .item-info {
             flex: 1;
         }
 
-        .isp-name {
+        .item-name {
             font-weight: 600;
             color: #60a5fa;
             margin-bottom: 5px;
         }
 
-        .isp-ip {
+        .item-details {
             color: #94a3b8;
             font-family: 'Courier New', monospace;
             font-size: 0.9rem;
+        }
+
+        .item-actions {
+            display: flex;
+            gap: 8px;
         }
 
         .empty-state {
@@ -167,66 +240,52 @@
             border: 1px solid #166534;
         }
 
-        textarea {
-            width: 100%;
-            min-height: 180px;
-            background: #041029;
-            border: 1px solid #334155;
-            border-radius: 6px;
-            color: #e2e8f0;
-            padding: 12px;
-            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
-            font-size: 0.95rem;
-            resize: vertical;
-        }
-
-        .editor-actions {
-            margin-top: 12px;
-            display: flex;
-            gap: 12px;
-        }
-
-        .editor-actions button {
-            flex: 1;
-        }
-
-        .copy-snippet {
-            margin-top: 6px;
-            font-size: 0.85rem;
-            background: #475569;
-            border: none;
-            color: #e2e8f0;
-            padding: 6px 12px;
-            border-radius: 6px;
-            cursor: pointer;
-        }
-
-        .copy-snippet:hover {
-            background: #64748b;
-        }
-
+        /* Editor Section */
         .editor-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            grid-template-columns: 1fr 1fr;
             gap: 20px;
+            margin-top: 20px;
+        }
+
+        @media (max-width: 1200px) {
+            .editor-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .editor-panel {
+            display: flex;
+            flex-direction: column;
         }
 
         .editor-panel label {
             font-size: 0.85rem;
             color: #94a3b8;
             margin-bottom: 4px;
-            display: inline-block;
         }
 
         .editor-panel input,
         .editor-panel select {
-            width: 100%;
-            padding: 10px;
-            background: #041029;
+            margin-bottom: 12px;
+        }
+
+        /* Monaco Editor */
+        #monaco-editor-container {
+            height: 500px;
             border: 1px solid #334155;
             border-radius: 6px;
-            color: #e2e8f0;
             margin-bottom: 12px;
+        }
+
+        .editor-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .editor-actions button {
+            flex: 1;
         }
 
         .pseudo-output {
@@ -234,10 +293,11 @@
             border: 1px solid #334155;
             border-radius: 8px;
             padding: 18px;
-            min-height: 320px;
+            min-height: 500px;
             display: flex;
             flex-direction: column;
             gap: 12px;
+            overflow-y: auto;
         }
 
         .pseudo-output pre {
@@ -247,6 +307,7 @@
             font-size: 0.85rem;
             line-height: 1.4;
             overflow-x: auto;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
         }
 
         .pseudo-output .parsed-table {
@@ -289,22 +350,6 @@
             width: 30%;
         }
 
-        .parsed-row {
-            background: #020617;
-            padding: 8px;
-            border-radius: 6px;
-            border: 1px solid #334155;
-        }
-
-        .parsed-row strong {
-            display: block;
-            color: #cbd5e1;
-            font-size: 0.78rem;
-            margin-bottom: 4px;
-            text-transform: uppercase;
-            letter-spacing: 0.03em;
-        }
-
         .editor-subtitle {
             color: #94a3b8;
             font-size: 0.9rem;
@@ -325,6 +370,7 @@
             line-height: 1.4;
             margin-bottom: 6px;
             color: #cbd5e1;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
         }
 
         .log-entry.error {
@@ -352,80 +398,80 @@
             margin-top: 12px;
         }
 
-        .docs-wrapper {
-            margin-top: 25px;
-        }
-
-        details.docs {
-            border: 1px solid #334155;
-            border-radius: 10px;
-            background: #010b1d;
-            padding: 16px;
-            margin-top: 10px;
-        }
-
-        details.docs summary {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #60a5fa;
-            cursor: pointer;
-            list-style: none;
-        }
-
-        details.docs summary::-webkit-details-marker {
+        /* Modal */
+        .modal {
             display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
         }
 
-        details.docs[open] summary::after {
-            content: "↑";
-            float: right;
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
-        summary::after {
-            content: "↓";
-            float: right;
-            transition: transform 0.2s ease;
-        }
-
-        details.docs[open] summary::after {
-            transform: rotate(180deg);
-        }
-
-        .docs-content {
-            margin-top: 18px;
-            max-height: 380px;
-            overflow-y: auto;
-            padding-right: 4px;
-        }
-
-        .docs-content h3 {
-            margin-bottom: 6px;
-            font-size: 1rem;
-            color: #93c5fd;
-        }
-
-        .docs-content p,
-        .docs-content li {
-            color: #cbd5e1;
-            font-size: 0.9rem;
-            line-height: 1.5;
-        }
-
-        .docs-section {
-            margin-bottom: 16px;
-        }
-
-        .docs-content pre {
-            background: #020617;
-            border-radius: 6px;
+        .modal-content {
+            background: #1e293b;
             border: 1px solid #334155;
-            padding: 10px;
-            font-size: 0.85rem;
-            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
-            overflow-x: auto;
-            margin-bottom: 12px;
+            border-radius: 8px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
         }
-    </style>
+
+        .modal-content h3 {
+            color: #60a5fa;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+        }
+
+        .modal-content p {
+            color: #cbd5e1;
+            margin-bottom: 20px;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        .modal-actions button {
+            min-width: 100px;
+        }
+
+        .modal-actions button.cancel {
+            background: #475569;
+        }
+
+        .modal-actions button.cancel:hover {
+            background: #64748b;
+        }
+
+
+        .gameserver-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+            font-size: 0.9rem;
+        }
+
+        .gameserver-details span {
+            color: #94a3b8;
+        }
+
+        .gameserver-details strong {
+            color: #cbd5e1;
+        }
     </style>
 </head>
 <body>
@@ -435,238 +481,294 @@
             <div class="version">Version: {{VERSION}}</div>
         </header>
 
-        <div class="section">
-            <h2>Add ISP</h2>
-            <div id="message"></div>
-            <form id="isp-form">
-                <div class="form-group">
-                    <label for="isp-name">ISP Name</label>
-                    <input type="text" id="isp-name" name="name" placeholder="e.g., Google DNS, Cloudflare DNS" required>
-                </div>
-                <div class="form-group">
-                    <label for="isp-ip">IP Address</label>
-                    <input type="text" id="isp-ip" name="ip" placeholder="e.g., 8.8.8.8, 1.1.1.1" required>
-                </div>
-                <button type="submit">Add ISP</button>
-            </form>
+        <!-- Tab Navigation -->
+        <div class="tabs">
+            <button class="tab-button active" data-tab="isp-website">ISP/Website</button>
+            <button class="tab-button" data-tab="protocol">Protocol-Agnostic</button>
         </div>
 
-        <div class="section">
-            <h2>ISP List</h2>
-            <div id="isp-list" class="isp-list">
-                <div class="empty-state">Loading...</div>
+        <!-- ISP/Website Tab -->
+        <div id="isp-website-tab" class="tab-content active">
+            <!-- ISP Section -->
+            <div class="section">
+                <h2>Add ISP</h2>
+                <div id="message"></div>
+                <form id="isp-form">
+                    <div class="form-group">
+                        <label for="isp-name">ISP Name</label>
+                        <input type="text" id="isp-name" name="name" placeholder="e.g., Google DNS, Cloudflare DNS" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="isp-ip">IP Address</label>
+                        <input type="text" id="isp-ip" name="ip" placeholder="e.g., 8.8.8.8, 1.1.1.1" required>
+                    </div>
+                    <button type="submit">Add ISP</button>
+                </form>
+            </div>
+
+            <div class="section">
+                <h2>ISP List</h2>
+                <div id="isp-list" class="isp-list">
+                    <div class="empty-state">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Website Section -->
+            <div class="section">
+                <h2>Add Website</h2>
+                <div id="website-message"></div>
+                <form id="website-form">
+                    <div class="form-group">
+                        <label for="website-url">URL</label>
+                        <input type="text" id="website-url" name="url" placeholder="e.g., example.com, https://example.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="website-direct-connect" name="direct_connect">
+                            Enable Direct Connect
+                        </label>
+                    </div>
+                    <div class="form-group" id="direct-url-group" style="display: none;">
+                        <label for="website-direct-url">Direct Connect URL (optional)</label>
+                        <input type="text" id="website-direct-url" name="direct_connect_url" placeholder="e.g., http://192.168.1.1">
+                        <small style="color: #94a3b8; font-size: 0.85rem;">If provided, this URL will be used for direct connection instead of resolving DNS.</small>
+                    </div>
+                    <button type="submit">Add Website</button>
+                </form>
+            </div>
+
+            <div class="section">
+                <h2>Website List</h2>
+                <div id="website-list" class="website-list">
+                    <div class="empty-state">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Game Servers List -->
+            <div class="section">
+                <h2>Game Servers</h2>
+                <div id="gameserver-list" class="gameserver-list">
+                    <div class="empty-state">Loading...</div>
+                </div>
             </div>
         </div>
 
-        <div class="section">
-            <h2>Add Website</h2>
-            <div id="website-message"></div>
-            <form id="website-form">
-                <div class="form-group">
-                    <label for="website-url">URL</label>
-                    <input type="text" id="website-url" name="url" placeholder="e.g., example.com, https://example.com" required>
-                </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="website-direct-connect" name="direct_connect">
-                        Enable Direct Connect
-                    </label>
-                </div>
-                <div class="form-group" id="direct-url-group" style="display: none;">
-                    <label for="website-direct-url">Direct Connect URL (optional)</label>
-                    <input type="text" id="website-direct-url" name="direct_connect_url" placeholder="e.g., http://192.168.1.1">
-                    <small style="color: #94a3b8; font-size: 0.85rem;">If provided, this URL will be used for direct connection instead of resolving DNS.</small>
-                </div>
-                <button type="submit">Add Website</button>
-            </form>
-        </div>
-
-        <div class="section">
-            <h2>Website List</h2>
-            <div id="website-list" class="isp-list">
-                <div class="empty-state">Loading...</div>
-            </div>
-        </div>
-
-        <div class="section editor-section">
-            <h2>Game Server Pseudo-code Editor</h2>
-            <p class="editor-subtitle">Craft packets and preview how the parser would interpret your script before saving a configuration.</p>
-            <div class="editor-grid">
-                <div class="editor-panel">
-                    <div class="form-group">
-                        <label for="editor-name">Server Name</label>
-                        <input type="text" id="editor-name" name="editor_name" placeholder="My Game Server">
-                    </div>
-                    <div class="form-group">
-                        <label for="editor-address">Address</label>
-                        <input type="text" id="editor-address" name="editor_address" placeholder="example.com">
-                    </div>
-                    <div class="form-group">
-                        <label for="editor-port">Port</label>
-                        <input type="text" id="editor-port" name="editor_port" placeholder="25565">
-                    </div>
-                    <div class="form-group">
-                        <label for="editor-protocol">Protocol</label>
-                        <select id="editor-protocol" name="editor_protocol">
-                            <option value="UDP">UDP</option>
-                            <option value="TCP">TCP</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="editor-timeout">Timeout (ms)</label>
-                        <input type="text" id="editor-timeout" name="editor_timeout" placeholder="5000">
-                    </div>
-                    <div class="form-group">
-                        <label for="pseudo-code-input">Pseudo-code</label>
-                        <textarea id="pseudo-code-input" spellcheck="false"># Minecraft-style query
-PACKET_START
-WRITE_BYTE 0xFE
-WRITE_BYTE 0xFD
-WRITE_BYTE 0x09
-WRITE_INT 0x00000000
-PACKET_END
-
-RESPONSE_START
-EXPECT_BYTE 0xFE
-EXPECT_BYTE 0xFD
-READ_BYTE packet_type
-READ_STRING_NULL session_id
-READ_STRING_NULL challenge_token
-RESPONSE_END</textarea>
-                    </div>
-                    <div class="editor-actions">
-                        <button type="button" id="editor-test">Test Server</button>
-                        <button type="button" id="editor-save">Save Game Server</button>
-                        <button type="button" id="editor-clear">Reset</button>
-                    </div>
-                </div>
-                <div class="pseudo-output" id="editor-output">
-                    <p class="editor-status" id="editor-status">Status: Ready to test your script</p>
-                    <pre id="editor-raw">Raw Response will appear here after preview</pre>
-                    <div>
-                        <p class="editor-subtitle">Variables</p>
-                        <table class="parsed-table" id="editor-variables">
-                            <thead>
-                                <tr>
-                                    <th>Variable</th>
-                                    <th>Value</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>No variables</td>
-                                    <td>Variables from CODE blocks will appear here</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <div>
-                        <p class="editor-subtitle">Parsed Values</p>
-                        <table class="parsed-table" id="editor-parsed">
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Value</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>packet_type</td>
-                                    <td>0x49 (73)</td>
-                                </tr>
-                                <tr>
-                                    <td>session_id</td>
-                                    <td>"session-abc123"</td>
-                                </tr>
-                                <tr>
-                                    <td>challenge_token</td>
-                                    <td>"token-987"</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <p class="editor-subtitle" id="editor-response-time">Response Time: --</p>
-                    <div class="output-section">
-                        <p class="editor-subtitle">Output Success</p>
-                        <div class="output-labels" id="editor-output-success">
-                            Output labels will appear here once the test finishes.
+        <!-- Protocol-Agnostic Tab -->
+        <div id="protocol-tab" class="tab-content">
+            <div class="section">
+                <h2>Protocol-Agnostic Pseudo-code Editor</h2>
+                <p class="editor-subtitle">Write and test pseudo-code in a full-featured editor.</p>
+                <div class="editor-grid">
+                    <div class="editor-panel">
+                        <div class="form-group">
+                            <label for="protocol-editor-name">Server Name (for testing)</label>
+                            <input type="text" id="protocol-editor-name" placeholder="Test Server">
+                        </div>
+                        <div class="form-group">
+                            <label for="protocol-editor-address">Address</label>
+                            <input type="text" id="protocol-editor-address" placeholder="example.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="protocol-editor-port">Port</label>
+                            <input type="number" id="protocol-editor-port" placeholder="25565" min="1" max="65535">
+                        </div>
+                        <div class="form-group">
+                            <label for="protocol-editor-protocol">Protocol</label>
+                            <select id="protocol-editor-protocol">
+                                <option value="UDP">UDP</option>
+                                <option value="TCP">TCP</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="protocol-editor-timeout">Timeout (ms)</label>
+                            <input type="number" id="protocol-editor-timeout" placeholder="5000" min="1000" value="5000">
+                        </div>
+                        <div class="form-group">
+                            <label for="protocol-editor-code">Pseudo-code</label>
+                            <div id="monaco-editor-container"></div>
+                        </div>
+                        <div class="editor-actions">
+                            <button type="button" id="protocol-editor-test">Test</button>
+                            <button type="button" id="protocol-editor-save">Save Game Server</button>
+                            <button type="button" id="protocol-editor-clear">Clear</button>
                         </div>
                     </div>
-                    <div class="output-section">
-                        <p class="editor-subtitle">Output Error</p>
-                        <div class="output-labels" id="editor-output-error">
-                            Error labels will appear here if the test fails.
+                    <div class="pseudo-output" id="protocol-editor-output">
+                        <p class="editor-status" id="protocol-editor-status">Status: Ready to test your script</p>
+                        <pre id="protocol-editor-raw">Raw Response will appear here after preview</pre>
+                        <div>
+                            <p class="editor-subtitle">Variables</p>
+                            <table class="parsed-table" id="protocol-editor-variables">
+                                <thead>
+                                    <tr>
+                                        <th>Variable</th>
+                                        <th>Value</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>No variables</td>
+                                        <td>Variables from CODE blocks will appear here</td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
-                    </div>
-                    <div class="log-panel" id="editor-log">
-                        <div class="log-entry">Logs will appear here when a test runs.</div>
+                        <div>
+                            <p class="editor-subtitle">Parsed Values</p>
+                            <table class="parsed-table" id="protocol-editor-parsed">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Value</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td colspan="2">No parsed values yet</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="editor-subtitle" id="protocol-editor-response-time">Response Time: --</p>
+                        <div class="output-section">
+                            <p class="editor-subtitle">Output Success</p>
+                            <div class="output-labels" id="protocol-editor-output-success">
+                                Output labels will appear here once the test finishes.
+                            </div>
+                        </div>
+                        <div class="output-section">
+                            <p class="editor-subtitle">Output Error</p>
+                            <div class="output-labels" id="protocol-editor-output-error">
+                                Error labels will appear here if the test fails.
+                            </div>
+                        </div>
+                        <div class="log-panel" id="protocol-editor-log">
+                            <div class="log-entry">Logs will appear here when a test runs.</div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
+    </div>
 
-        <div class="section docs-wrapper">
-            <details class="docs">
-                <summary>Pseudo-code Reference</summary>
-                <div class="docs-content">
-                    <div class="docs-section">
-                        <h3>Packet Construction</h3>
-                        <p>Commands inside <strong>PACKET_START/END</strong> construct the bytes that will be sent to the server. Use decimal or hex literals.</p>
-                        <pre>WRITE_BYTE 0xFF
-WRITE_SHORT 1234
-WRITE_INT_BE 5000
-WRITE_STRING "STATUS"</pre>
-                    </div>
-                    <div class="docs-section">
-                        <h3>Response Parsing</h3>
-                        <p>Define the layout of the server's reply between <strong>RESPONSE_START</strong> and <strong>RESPONSE_END</strong>. support both length-based and null-terminated strings.</p>
-                        <pre>EXPECT_BYTE 0xFE
-READ_BYTE packet_type
-READ_STRING_NULL server_name
-SKIP_BYTES 4</pre>
-                    </div>
-                    <div class="docs-section">
-                        <h3>Validation</h3>
-                        <p>Use <code>EXPECT_*</code> commands to assert magic bytes before reading the payload, catching mismatched protocols early.</p>
-                        <pre>EXPECT_BYTE 0xFE
-EXPECT_MAGIC "FEEDFACE"</pre>
-                    </div>
-                    <div class="docs-section">
-                        <h3>Example Script</h3>
-                        <pre># Minecraft-style query
-PACKET_START
-WRITE_BYTE 0xFE
-WRITE_BYTE 0xFD
-WRITE_BYTE 0x09
-WRITE_INT 0x00000000
-PACKET_END
-
-RESPONSE_START
-EXPECT_BYTE 0xFE
-EXPECT_BYTE 0xFD
-READ_BYTE packet_type
-READ_STRING_NULL session_id
-READ_STRING_NULL challenge_token
-RESPONSE_END</pre>
-                    </div>
-                    <div class="docs-section">
-                        <h3>Output Preview</h3>
-                        <pre>Status: ✅ Success
-Response Time: 45 ms
-Raw Response: FF FE FD 09 00 00 00 00 00 00 00 00 05 74 65 73 74
-Parsed Values:
-- packet_type: 0x49 (73)
-- session_id: "session-abc123"
-- challenge_token: "token-987"</pre>
-                    </div>
-                </div>
-            </details>
+    <!-- Delete Confirmation Modal -->
+    <div id="delete-modal" class="modal">
+        <div class="modal-content">
+            <h3>Confirm Delete</h3>
+            <p id="delete-modal-message">Are you sure you want to delete this item?</p>
+            <div class="modal-actions">
+                <button class="cancel" id="delete-modal-cancel">Cancel</button>
+                <button class="delete" id="delete-modal-confirm">Delete</button>
+            </div>
         </div>
     </div>
 
     <script>
         const VERSION = '{{VERSION}}';
 
+        // Monaco Editor instance
+        let monacoEditor = null;
+
+        // Initialize Monaco Editor
+        require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
+        require(['vs/editor/editor.main'], function () {
+            monacoEditor = monaco.editor.create(document.getElementById('monaco-editor-container'), {
+                value: `# Minecraft-style query
+PACKET_START
+WRITE_BYTE 0xFE
+WRITE_BYTE 0xFD
+WRITE_BYTE 0x09
+WRITE_INT 0x00000000
+PACKET_END
+
+RESPONSE_START
+EXPECT_BYTE 0xFE
+EXPECT_BYTE 0xFD
+READ_BYTE packet_type
+READ_STRING_NULL session_id
+READ_STRING_NULL challenge_token
+RESPONSE_END`,
+                language: 'plaintext',
+                theme: 'vs-dark',
+                automaticLayout: true,
+                fontSize: 14,
+                minimap: { enabled: true },
+                wordWrap: 'on',
+                lineNumbers: 'on',
+                scrollBeyondLastLine: false,
+            });
+        });
+
+        // Tab switching
+        document.querySelectorAll('.tab-button').forEach(button => {
+            button.addEventListener('click', () => {
+                const tabName = button.dataset.tab;
+                document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+                button.classList.add('active');
+                document.getElementById(`${tabName}-tab`).classList.add('active');
+                // Resize Monaco editor when tab becomes active
+                if (tabName === 'protocol' && monacoEditor) {
+                    setTimeout(() => monacoEditor.layout(), 100);
+                }
+            });
+        });
+
+        // Modal handling
+        const deleteModal = document.getElementById('delete-modal');
+        const deleteModalMessage = document.getElementById('delete-modal-message');
+        const deleteModalCancel = document.getElementById('delete-modal-cancel');
+        const deleteModalConfirm = document.getElementById('delete-modal-confirm');
+        const deleteModalTitle = deleteModal.querySelector('h3');
+
+        let deleteCallback = null;
+
+        deleteModalCancel.addEventListener('click', () => {
+            deleteModal.classList.remove('active');
+            deleteCallback = null;
+            // Reset modal to delete mode
+            deleteModalTitle.textContent = 'Confirm Delete';
+            deleteModalConfirm.textContent = 'Delete';
+            deleteModalConfirm.className = 'delete';
+        });
+
+        deleteModalConfirm.addEventListener('click', () => {
+            if (deleteCallback) {
+                deleteCallback();
+                deleteModal.classList.remove('active');
+                deleteCallback = null;
+                // Reset modal to delete mode
+                deleteModalTitle.textContent = 'Confirm Delete';
+                deleteModalConfirm.textContent = 'Delete';
+                deleteModalConfirm.className = 'delete';
+            }
+        });
+
+        function showDeleteModal(message, callback) {
+            deleteModalTitle.textContent = 'Confirm Delete';
+            deleteModalMessage.textContent = message;
+            deleteModalConfirm.textContent = 'Delete';
+            deleteModalConfirm.className = 'delete';
+            deleteCallback = callback;
+            deleteModal.classList.add('active');
+        }
+
+        function showSaveModal(message, callback) {
+            deleteModalTitle.textContent = 'Confirm Save';
+            deleteModalMessage.textContent = message;
+            deleteModalConfirm.textContent = 'Save';
+            deleteModalConfirm.className = 'test'; // Use test button style (green) for save
+            deleteCallback = callback;
+            deleteModal.classList.add('active');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // ISP Management
         function showMessage(text, isError = false) {
             const messageEl = document.getElementById('message');
             messageEl.className = isError ? 'error' : 'success';
@@ -698,35 +800,32 @@ Parsed Values:
 
             listEl.innerHTML = isps.map(isp => `
                 <div class="isp-item">
-                    <div class="isp-info">
-                        <div class="isp-name">${escapeHtml(isp.name)}</div>
-                        <div class="isp-ip">${escapeHtml(isp.ip)}</div>
+                    <div class="item-info">
+                        <div class="item-name">${escapeHtml(isp.name)}</div>
+                        <div class="item-details">${escapeHtml(isp.ip)}</div>
                     </div>
-                    <button class="delete" onclick="deleteISP(${isp.id})">Delete</button>
+                    <div class="item-actions">
+                        <button class="delete" onclick="deleteISP(${isp.id}, '${escapeHtml(isp.name)}')">Delete</button>
+                    </div>
                 </div>
             `).join('');
         }
 
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+        async function deleteISP(id, name) {
+            showDeleteModal(`Are you sure you want to delete the ISP "${name}"? This action cannot be undone.`, async () => {
+                try {
+                    const response = await fetch(`/api/isps/${id}`, {
+                        method: 'DELETE'
+                    });
+                    if (!response.ok) throw new Error('Failed to delete ISP');
+                    showMessage('ISP deleted successfully');
+                    loadISPs();
+                } catch (error) {
+                    showMessage(`Error deleting ISP: ${error.message}`, true);
+                }
+            });
         }
-
-        async function deleteISP(id) {
-            if (!confirm('Are you sure you want to delete this ISP?')) return;
-
-            try {
-                const response = await fetch(`/api/isps/${id}`, {
-                    method: 'DELETE'
-                });
-                if (!response.ok) throw new Error('Failed to delete ISP');
-                showMessage('ISP deleted successfully');
-                loadISPs();
-            } catch (error) {
-                showMessage(`Error deleting ISP: ${error.message}`, true);
-            }
-        }
+        window.deleteISP = deleteISP;
 
         document.getElementById('isp-form').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -758,10 +857,7 @@ Parsed Values:
             }
         });
 
-        // Load ISPs on page load
-        loadISPs();
-
-        // Website management
+        // Website Management
         const directConnectCheckbox = document.getElementById('website-direct-connect');
         const directUrlGroup = document.getElementById('direct-url-group');
 
@@ -789,33 +885,36 @@ Parsed Values:
             }
 
             listEl.innerHTML = websites.map(website => `
-                <div class="isp-item">
-                    <div class="isp-info">
-                        <div class="isp-name">${escapeHtml(website.url)}</div>
-                        <div class="isp-ip">
+                <div class="website-item">
+                    <div class="item-info">
+                        <div class="item-name">${escapeHtml(website.url)}</div>
+                        <div class="item-details">
                             Direct Connect: ${website.direct_connect ? 'Yes' : 'No'}
                             ${website.direct_connect_url ? ` | Direct URL: ${escapeHtml(website.direct_connect_url)}` : ''}
                         </div>
                     </div>
-                    <button class="delete" onclick="deleteWebsite(${website.id})">Delete</button>
+                    <div class="item-actions">
+                        <button class="delete" onclick="deleteWebsite(${website.id}, '${escapeHtml(website.url)}')">Delete</button>
+                    </div>
                 </div>
             `).join('');
         }
 
-        async function deleteWebsite(id) {
-            if (!confirm('Are you sure you want to delete this website?')) return;
-
-            try {
-                const response = await fetch(`/api/websites/${id}`, {
-                    method: 'DELETE'
-                });
-                if (!response.ok) throw new Error('Failed to delete website');
-                showWebsiteMessage('Website deleted successfully');
-                loadWebsites();
-            } catch (error) {
-                showWebsiteMessage(`Error deleting website: ${error.message}`, true);
-            }
+        async function deleteWebsite(id, url) {
+            showDeleteModal(`Are you sure you want to delete the website "${url}"? This action cannot be undone.`, async () => {
+                try {
+                    const response = await fetch(`/api/websites/${id}`, {
+                        method: 'DELETE'
+                    });
+                    if (!response.ok) throw new Error('Failed to delete website');
+                    showWebsiteMessage('Website deleted successfully');
+                    loadWebsites();
+                } catch (error) {
+                    showWebsiteMessage(`Error deleting website: ${error.message}`, true);
+                }
+            });
         }
+        window.deleteWebsite = deleteWebsite;
 
         function showWebsiteMessage(text, isError = false) {
             const messageEl = document.getElementById('website-message');
@@ -860,132 +959,149 @@ Parsed Values:
             }
         });
 
-        // Load websites on page load
-        loadWebsites();
-
-        const pseudoCodeInput = document.getElementById('pseudo-code-input');
-        const editorStatus = document.getElementById('editor-status');
-        const editorRaw = document.getElementById('editor-raw');
-        const editorVariables = document.getElementById('editor-variables');
-        const editorParsed = document.getElementById('editor-parsed');
-        const editorResponseTime = document.getElementById('editor-response-time');
-        const editorOutputSuccess = document.getElementById('editor-output-success');
-        const editorOutputError = document.getElementById('editor-output-error');
-        const editorTestButton = document.getElementById('editor-test');
-        const editorSaveButton = document.getElementById('editor-save');
-        const editorClearButton = document.getElementById('editor-clear');
-        const editorNameInput = document.getElementById('editor-name');
-        const editorAddressInput = document.getElementById('editor-address');
-        const editorPortInput = document.getElementById('editor-port');
-        const editorProtocolInput = document.getElementById('editor-protocol');
-        const editorTimeoutInput = document.getElementById('editor-timeout');
-
-        const defaultParsedValues = [
-            { name: 'packet_type', value: '0x49 (73)' },
-            { name: 'session_id', value: '"session-abc123"' },
-            { name: 'challenge_token', value: '"token-987"' },
-        ];
-
-        const defaultRawResponse = editorRaw.textContent;
-        const defaultPseudoCode = pseudoCodeInput.value;
-        const editorLog = document.getElementById('editor-log');
-
-        function renderParsed(values) {
-            if (!values || values.length === 0) {
-                editorParsed.innerHTML = `
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Value</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>No parsed values</td>
-                            <td>Parsed values will appear here after test</td>
-                        </tr>
-                    </tbody>
-                `;
-                return;
+        // Game Server Management
+        async function loadGameServers() {
+            try {
+                const response = await fetch('/api/gameservers');
+                if (!response.ok) throw new Error('Failed to fetch game servers');
+                const servers = await response.json();
+                renderGameServers(servers);
+            } catch (error) {
+                document.getElementById('gameserver-list').innerHTML = 
+                    `<div class="error">Error loading game servers: ${error.message}</div>`;
             }
-            // Values array should already be in order
-            const rows = values
-                .map(
-                    (item) => `
-                        <tr>
-                            <td>${item.name}</td>
-                            <td>${item.value}</td>
-                        </tr>
-                    `
-                )
-                .join('');
-            editorParsed.innerHTML = `
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Value</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${rows}
-                </tbody>
-            `;
         }
 
-        function renderVariables(variables) {
-            if (!variables || Object.keys(variables).length === 0) {
-                editorVariables.innerHTML = `
-                    <thead>
-                        <tr>
-                            <th>Variable</th>
-                            <th>Value</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>No variables</td>
-                            <td>Variables from CODE blocks will appear here</td>
-                        </tr>
-                    </tbody>
-                `;
+        function renderGameServers(servers) {
+            const listEl = document.getElementById('gameserver-list');
+            if (servers.length === 0) {
+                listEl.innerHTML = '<div class="empty-state">No game servers configured. Create one in the Protocol-Agnostic tab to get started.</div>';
                 return;
             }
-            // Object.entries preserves insertion order in modern JavaScript
-            const rows = Object.entries(variables)
-                .map(
-                    ([name, value]) => {
-                        let displayValue = value;
-                        if (typeof value === 'object') {
-                            if (Array.isArray(value)) {
-                                displayValue = `[${value.map(v => JSON.stringify(v)).join(', ')}]`;
-                            } else {
-                                displayValue = JSON.stringify(value);
-                            }
-                        } else if (typeof value === 'string') {
-                            displayValue = `"${value}"`;
-                        }
-                        return `
-                            <tr>
-                                <td>${name}</td>
-                                <td>${displayValue}</td>
-                            </tr>
-                        `;
+
+            listEl.innerHTML = servers.map(server => `
+                <div class="gameserver-item">
+                    <div class="item-info">
+                        <div class="item-name">${escapeHtml(server.name)}</div>
+                        <div class="gameserver-details">
+                            <span><strong>Address:</strong> ${escapeHtml(server.address)}</span>
+                            <span><strong>Port:</strong> ${server.port}</span>
+                            <span><strong>Protocol:</strong> ${server.protocol}</span>
+                            <span><strong>Timeout:</strong> ${server.timeout_ms}ms</span>
+                        </div>
+                    </div>
+                    <div class="item-actions">
+                        <button class="edit" onclick="editGameServer(${server.id})">Edit</button>
+                        <button class="test" onclick="testGameServer(${server.id})">Test</button>
+                        <button class="delete" onclick="deleteGameServer(${server.id}, '${escapeHtml(server.name)}')">Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function deleteGameServer(id, name) {
+            showDeleteModal(`Are you sure you want to delete the game server "${name}"? This action cannot be undone.`, async () => {
+                try {
+                    const response = await fetch(`/api/gameservers/${id}`, {
+                        method: 'DELETE'
+                    });
+                    if (!response.ok) throw new Error('Failed to delete game server');
+                    loadGameServers();
+                } catch (error) {
+                    alert(`Error deleting game server: ${error.message}`);
+                }
+            });
+        }
+        window.deleteGameServer = deleteGameServer;
+
+        async function editGameServer(id) {
+            try {
+                const response = await fetch('/api/gameservers');
+                if (!response.ok) throw new Error('Failed to fetch game servers');
+                const servers = await response.json();
+                const server = servers.find(s => s.id === id);
+                if (!server) {
+                    alert('Game server not found');
+                    return;
+                }
+
+                // Populate protocol editor fields
+                document.getElementById('protocol-editor-name').value = server.name;
+                document.getElementById('protocol-editor-address').value = server.address;
+                document.getElementById('protocol-editor-port').value = server.port;
+                document.getElementById('protocol-editor-protocol').value = server.protocol;
+                document.getElementById('protocol-editor-timeout').value = server.timeout_ms;
+                
+                // Set Monaco editor content
+                if (monacoEditor) {
+                    monacoEditor.setValue(server.pseudo_code);
+                }
+
+                // Store the ID for updating (if we had an update endpoint)
+                protocolEditorSaveButton.dataset.serverId = id;
+
+                // Switch to Protocol-Agnostic tab
+                document.querySelector('[data-tab="protocol"]').click();
+                setTimeout(() => {
+                    if (monacoEditor) {
+                        monacoEditor.layout();
                     }
-                )
-                .join('');
-            editorVariables.innerHTML = `
-                <thead>
-                    <tr>
-                        <th>Variable</th>
-                        <th>Value</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${rows}
-                </tbody>
-            `;
+                }, 100);
+            } catch (error) {
+                alert(`Error loading game server: ${error.message}`);
+            }
         }
+        window.editGameServer = editGameServer;
 
+        async function testGameServer(id) {
+            try {
+                const response = await fetch(`/api/gameservers/${id}/test`, {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error?.message || result.error || 'Failed to test game server');
+                }
+
+                const status = result.success
+                    ? '✅ Server response received'
+                    : `❌ ${result.error?.message || 'Validation failed'}`;
+                const parsed = formatParsedValues(result.parsed_values);
+                const variables = result.variables || result.parsed_values || {};
+                
+                renderProtocolOutput({
+                    status,
+                    raw: result.raw_response ?? 'No response recorded',
+                    parsed: parsed.length ? parsed : [],
+                    variables: variables,
+                    time: typeof result.response_time_ms === 'number' ? `${result.response_time_ms} ms` : '--',
+                    outputLabelsSuccess: result.output_labels_success || [],
+                    outputLabelsError: result.output_labels_error || [],
+                });
+
+                const successType = result.success ? 'success' : 'error';
+                appendProtocolLog(`Test result: ${status}`, successType);
+                
+                // Switch to protocol tab to show results
+                document.querySelector('[data-tab="protocol"]').click();
+            } catch (error) {
+                appendProtocolLog(`Test failed: ${error.message}`, 'error');
+                renderProtocolOutput({
+                    status: `Error: ${error.message}`,
+                    raw: 'No response recorded',
+                    parsed: [],
+                    variables: {},
+                    time: '--',
+                    outputLabelsSuccess: [],
+                    outputLabelsError: [],
+                });
+                document.querySelector('[data-tab="protocol"]').click();
+            }
+        }
+        window.testGameServer = testGameServer;
+
+        // Protocol Editor functions
         function formatParsedValues(value) {
             if (value && typeof value === 'object' && !Array.isArray(value)) {
                 const entries = Object.entries(value);
@@ -1002,87 +1118,201 @@ Parsed Values:
             return [];
         }
 
-        function appendLog(message, type = 'info') {
-            if (editorLog.children.length === 1 && editorLog.children[0].textContent.includes('Logs will appear here')) {
-                editorLog.innerHTML = '';
+        function renderSection(container, labels, emptyText) {
+            if (!container) return;
+            if (labels.length === 0) {
+                container.textContent = emptyText;
+            } else {
+                container.innerHTML = labels.map(label => `<div>${escapeHtml(label)}</div>`).join('');
+            }
+        }
+        const protocolEditorStatus = document.getElementById('protocol-editor-status');
+        const protocolEditorRaw = document.getElementById('protocol-editor-raw');
+        const protocolEditorVariables = document.getElementById('protocol-editor-variables');
+        const protocolEditorParsed = document.getElementById('protocol-editor-parsed');
+        const protocolEditorResponseTime = document.getElementById('protocol-editor-response-time');
+        const protocolEditorOutputSuccess = document.getElementById('protocol-editor-output-success');
+        const protocolEditorOutputError = document.getElementById('protocol-editor-output-error');
+        const protocolEditorTestButton = document.getElementById('protocol-editor-test');
+        const protocolEditorSaveButton = document.getElementById('protocol-editor-save');
+        const protocolEditorClearButton = document.getElementById('protocol-editor-clear');
+        const protocolEditorLog = document.getElementById('protocol-editor-log');
+
+        function appendProtocolLog(message, type = 'info') {
+            if (protocolEditorLog.children.length === 1 && protocolEditorLog.children[0].textContent.includes('Logs will appear here')) {
+                protocolEditorLog.innerHTML = '';
             }
             const entry = document.createElement('div');
             entry.className = `log-entry${type !== 'info' ? ' ' + type : ''}`;
             entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-            editorLog.appendChild(entry);
-            editorLog.scrollTop = editorLog.scrollHeight;
+            protocolEditorLog.appendChild(entry);
+            protocolEditorLog.scrollTop = protocolEditorLog.scrollHeight;
         }
 
-        function renderEditorOutput({ status, raw, parsed, variables, time, outputLabelsSuccess, outputLabelsError }) {
-            editorStatus.textContent = `Status: ${status}`;
-            editorRaw.textContent = raw;
-            editorResponseTime.textContent = `Response Time: ${time}`;
-            renderVariables(variables || {});
-            renderParsed(parsed);
-            renderOutputSections(outputLabelsSuccess || [], outputLabelsError || []);
+        function renderProtocolVariables(variables) {
+            if (!variables || Object.keys(variables).length === 0) {
+                protocolEditorVariables.innerHTML = `
+                    <thead>
+                        <tr>
+                            <th>Variable</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>No variables</td>
+                            <td>Variables from CODE blocks will appear here</td>
+                        </tr>
+                    </tbody>
+                `;
+                return;
+            }
+            const rows = Object.entries(variables)
+                .map(([name, value]) => {
+                    let displayValue = value;
+                    if (typeof value === 'object') {
+                        if (Array.isArray(value)) {
+                            displayValue = `[${value.map(v => JSON.stringify(v)).join(', ')}]`;
+                        } else {
+                            displayValue = JSON.stringify(value);
+                        }
+                    } else if (typeof value === 'string') {
+                        displayValue = `"${value}"`;
+                    }
+                    return `
+                        <tr>
+                            <td>${escapeHtml(String(name))}</td>
+                            <td>${escapeHtml(String(displayValue))}</td>
+                        </tr>
+                    `;
+                })
+                .join('');
+            protocolEditorVariables.innerHTML = `
+                <thead>
+                    <tr>
+                        <th>Variable</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows}
+                </tbody>
+            `;
         }
 
-        editorTestButton.addEventListener('click', async () => {
-            const name = editorNameInput.value.trim() || 'Preview Server';
-            const address = editorAddressInput.value.trim();
-            const port = parseInt(editorPortInput.value, 10);
-            const protocol = editorProtocolInput.value;
-            const timeoutMs = parseInt(editorTimeoutInput.value, 10) || 5000;
-            const pseudoCode = pseudoCodeInput.value.trim();
+        function renderProtocolParsed(values) {
+            if (!values || values.length === 0) {
+                protocolEditorParsed.innerHTML = `
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td colspan="2">No parsed values yet</td>
+                        </tr>
+                    </tbody>
+                `;
+                return;
+            }
+            const rows = values
+                .map((item) => `
+                    <tr>
+                        <td>${escapeHtml(item.name)}</td>
+                        <td>${escapeHtml(String(item.value))}</td>
+                    </tr>
+                `)
+                .join('');
+            protocolEditorParsed.innerHTML = `
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows}
+                </tbody>
+            `;
+        }
+
+        function renderProtocolOutput({ status, raw, parsed, variables, time, outputLabelsSuccess, outputLabelsError }) {
+            protocolEditorStatus.textContent = `Status: ${status}`;
+            protocolEditorRaw.textContent = raw;
+            protocolEditorResponseTime.textContent = `Response Time: ${time}`;
+            renderProtocolVariables(variables || {});
+            renderProtocolParsed(parsed);
+            renderProtocolOutputSections(outputLabelsSuccess || [], outputLabelsError || []);
+        }
+
+        function renderProtocolOutputSections(successLabels, errorLabels) {
+            renderSection(protocolEditorOutputSuccess, successLabels, 'Output labels will appear here once the test finishes.');
+            renderSection(protocolEditorOutputError, errorLabels, 'Error labels will appear here if the test fails.');
+        }
+
+        protocolEditorTestButton.addEventListener('click', async () => {
+            const name = document.getElementById('protocol-editor-name').value.trim() || 'Test Server';
+            const address = document.getElementById('protocol-editor-address').value.trim();
+            const port = parseInt(document.getElementById('protocol-editor-port').value, 10);
+            const protocol = document.getElementById('protocol-editor-protocol').value;
+            const timeoutMs = parseInt(document.getElementById('protocol-editor-timeout').value, 10) || 5000;
+            const pseudoCode = monacoEditor ? monacoEditor.getValue() : '';
 
             if (!address) {
-                appendLog('Validation error: Server address required.', 'error');
-            renderEditorOutput({
-                status: 'Error: Server address required',
-                raw: defaultRawResponse,
-                parsed: defaultParsedValues,
-                variables: {},
-                time: '--',
-                outputLabelsSuccess: [],
-                outputLabelsError: [],
-            });
+                appendProtocolLog('Validation error: Server address required.', 'error');
+                renderProtocolOutput({
+                    status: 'Error: Server address required',
+                    raw: 'No response recorded',
+                    parsed: [],
+                    variables: {},
+                    time: '--',
+                    outputLabelsSuccess: [],
+                    outputLabelsError: [],
+                });
                 return;
             }
 
             if (!(port > 0 && port <= 65535)) {
-                appendLog('Validation error: Port must be between 1 and 65535.', 'error');
-            renderEditorOutput({
-                status: 'Error: Provide a valid port (1-65535)',
-                raw: defaultRawResponse,
-                parsed: defaultParsedValues,
-                variables: {},
-                time: '--',
-                outputLabelsSuccess: [],
-                outputLabelsError: [],
-            });
+                appendProtocolLog('Validation error: Port must be between 1 and 65535.', 'error');
+                renderProtocolOutput({
+                    status: 'Error: Provide a valid port (1-65535)',
+                    raw: 'No response recorded',
+                    parsed: [],
+                    variables: {},
+                    time: '--',
+                    outputLabelsSuccess: [],
+                    outputLabelsError: [],
+                });
                 return;
             }
 
             if (!pseudoCode) {
-                appendLog('Validation error: Pseudo-code is required.', 'error');
-            renderEditorOutput({
-                status: 'Error: Pseudo-code is required for testing',
-                raw: defaultRawResponse,
-                parsed: defaultParsedValues,
-                variables: {},
-                time: '--',
-                outputLabelsSuccess: [],
-                outputLabelsError: [],
-            });
+                appendProtocolLog('Validation error: Pseudo-code is required.', 'error');
+                renderProtocolOutput({
+                    status: 'Error: Pseudo-code is required for testing',
+                    raw: 'No response recorded',
+                    parsed: [],
+                    variables: {},
+                    time: '--',
+                    outputLabelsSuccess: [],
+                    outputLabelsError: [],
+                });
                 return;
             }
 
-            renderEditorOutput({
+            renderProtocolOutput({
                 status: 'Running test...',
-                raw: defaultRawResponse,
-                parsed: defaultParsedValues,
+                raw: 'Waiting for response...',
+                parsed: [],
                 variables: {},
                 time: '--',
                 outputLabelsSuccess: [],
                 outputLabelsError: [],
             });
-            appendLog(`Starting test for ${address}:${port}`);
-            appendLog(`Pseudo-code payload:\n${pseudoCode}`);
+            appendProtocolLog(`Starting test for ${address}:${port}`);
+            appendProtocolLog(`Pseudo-code payload:\n${pseudoCode}`);
 
             try {
                 const response = await fetch('/api/gameservers/test', {
@@ -1109,64 +1339,74 @@ Parsed Values:
                     ? '✅ Server response received'
                     : `❌ ${result.error?.message || 'Validation failed'}`;
                 const parsed = formatParsedValues(result.parsed_values);
-                // Extract variables from parsed_values (variables from CODE blocks)
-                // For now, we'll show all parsed values in both sections
-                // In the future, variables could be separated in the API response
                 const variables = result.variables || result.parsed_values || {};
-                renderEditorOutput({
+                renderProtocolOutput({
                     status,
                     raw: result.raw_response ?? 'No response recorded',
-                    parsed: parsed.length ? parsed : defaultParsedValues,
+                    parsed: parsed.length ? parsed : [],
                     variables: variables,
                     time: typeof result.response_time_ms === 'number' ? `${result.response_time_ms} ms` : '--',
                     outputLabelsSuccess: result.output_labels_success || [],
                     outputLabelsError: result.output_labels_error || [],
                 });
                 const successType = result.success ? 'success' : 'error';
-                appendLog(`Test result: ${status}`, successType);
+                appendProtocolLog(`Test result: ${status}`, successType);
             } catch (error) {
-                renderEditorOutput({
+                renderProtocolOutput({
                     status: `Error: ${error.message}`,
-                    raw: defaultRawResponse,
-                    parsed: defaultParsedValues,
+                    raw: 'No response recorded',
+                    parsed: [],
                     variables: {},
                     time: '--',
                     outputLabelsSuccess: [],
                     outputLabelsError: [],
                 });
-                appendLog(`Test failed: ${error.message}`, 'error');
+                appendProtocolLog(`Test failed: ${error.message}`, 'error');
             }
         });
 
-        editorSaveButton.addEventListener('click', async () => {
-            const name = editorNameInput.value.trim();
-            const address = editorAddressInput.value.trim();
-            const port = parseInt(editorPortInput.value, 10);
-            const protocol = editorProtocolInput.value;
-            const timeoutMs = parseInt(editorTimeoutInput.value, 10) || 5000;
-            const pseudoCode = pseudoCodeInput.value.trim();
+        protocolEditorSaveButton.addEventListener('click', async () => {
+            const name = document.getElementById('protocol-editor-name').value.trim();
+            const address = document.getElementById('protocol-editor-address').value.trim();
+            const port = parseInt(document.getElementById('protocol-editor-port').value, 10);
+            const protocol = document.getElementById('protocol-editor-protocol').value;
+            const timeoutMs = parseInt(document.getElementById('protocol-editor-timeout').value, 10) || 5000;
+            const pseudoCode = monacoEditor ? monacoEditor.getValue() : '';
+            const serverId = protocolEditorSaveButton.dataset.serverId;
 
             if (!name) {
-                appendLog('Validation error: Server name is required.', 'error');
+                appendProtocolLog('Validation error: Server name is required.', 'error');
                 return;
             }
 
             if (!address) {
-                appendLog('Validation error: Server address is required.', 'error');
+                appendProtocolLog('Validation error: Server address is required.', 'error');
                 return;
             }
 
             if (!(port > 0 && port <= 65535)) {
-                appendLog('Validation error: Port must be between 1 and 65535.', 'error');
+                appendProtocolLog('Validation error: Port must be between 1 and 65535.', 'error');
                 return;
             }
 
             if (!pseudoCode) {
-                appendLog('Validation error: Pseudo-code is required.', 'error');
+                appendProtocolLog('Validation error: Pseudo-code is required.', 'error');
                 return;
             }
 
-            appendLog(`Saving game server: ${name}`);
+            // If there's a serverId, we're editing an existing server - show confirmation
+            if (serverId) {
+                showSaveModal(`Are you sure you want to save changes to the game server "${name}"? This will overwrite the existing entry.`, async () => {
+                    await performSave(name, address, port, protocol, timeoutMs, pseudoCode);
+                });
+            } else {
+                // New server, save directly
+                await performSave(name, address, port, protocol, timeoutMs, pseudoCode);
+            }
+        });
+
+        async function performSave(name, address, port, protocol, timeoutMs, pseudoCode) {
+            appendProtocolLog(`Saving game server: ${name}`);
 
             try {
                 const response = await fetch('/api/gameservers', {
@@ -1189,36 +1429,22 @@ Parsed Values:
                     throw new Error(result.error || 'Failed to save game server');
                 }
 
-                appendLog(`Game server "${name}" saved successfully!`, 'success');
-                renderEditorOutput({
-                    status: `✅ Game server "${name}" saved successfully!`,
-                    raw: editorRaw.textContent,
-                    parsed: formatParsedValues({}),
-                    variables: {},
-                    time: editorResponseTime.textContent,
-                    outputLabelsSuccess: [],
-                    outputLabelsError: [],
-                });
+                appendProtocolLog(`Game server "${name}" saved successfully!`, 'success');
+                protocolEditorSaveButton.removeAttribute('data-server-id');
+                loadGameServers();
             } catch (error) {
-                appendLog(`Failed to save game server: ${error.message}`, 'error');
-                renderEditorOutput({
-                    status: `Error: ${error.message}`,
-                    raw: editorRaw.textContent,
-                    parsed: defaultParsedValues,
-                    variables: {},
-                    time: editorResponseTime.textContent,
-                    outputLabelsSuccess: [],
-                    outputLabelsError: [],
-                });
+                appendProtocolLog(`Failed to save game server: ${error.message}`, 'error');
             }
-        });
+        }
 
-        editorClearButton.addEventListener('click', () => {
-            pseudoCodeInput.value = defaultPseudoCode;
-            renderEditorOutput({
-                status: 'Editor reset',
-                raw: defaultRawResponse,
-                parsed: defaultParsedValues,
+        protocolEditorClearButton.addEventListener('click', () => {
+            // Clear the log
+            protocolEditorLog.innerHTML = '<div class="log-entry">Logs will appear here when a test runs.</div>';
+            // Clear only the output side
+            renderProtocolOutput({
+                status: 'Ready to test your script',
+                raw: 'Raw Response will appear here after preview',
+                parsed: [],
                 variables: {},
                 time: '--',
                 outputLabelsSuccess: [],
@@ -1226,30 +1452,10 @@ Parsed Values:
             });
         });
 
-        renderEditorOutput({
-            status: 'Ready to test your script',
-            raw: defaultRawResponse,
-            parsed: defaultParsedValues,
-            variables: {},
-            time: '--',
-            outputLabelsSuccess: [],
-            outputLabelsError: [],
-        });
-
-        function renderOutputSections(successLabels, errorLabels) {
-            renderSection(editorOutputSuccess, successLabels, 'Output labels will appear here once the test finishes.');
-            renderSection(editorOutputError, errorLabels, 'Error labels will appear here if the test fails.');
-        }
-
-        function renderSection(container, labels, emptyText) {
-            if (!container) return;
-            if (labels.length === 0) {
-                container.textContent = emptyText;
-            } else {
-                container.innerHTML = labels.map(label => `<div>${label}</div>`).join('');
-            }
-        }
+        // Initialize
+        loadISPs();
+        loadWebsites();
+        loadGameServers();
     </script>
 </body>
 </html>
-
