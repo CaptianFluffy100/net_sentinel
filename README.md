@@ -117,7 +117,21 @@ Comprehensive documentation is available in the `doc/` directory:
 - **[How It Works](doc/04-how-it-works.md)** - Internal implementation details
 - **[Hands-On Demo](doc/05-hands-on-demo.md)** - Complete walkthrough of RCON and Minecraft examples
 
+## Pseudo-Code Scripts
+
+Net Sentinel uses a simple pseudo-code language that lets you describe game server protocols without writing complex code. Instead of modifying Rust code, you write readable scripts that define:
+
+- **What packets to send** - Using `WRITE_*` commands to construct binary packets
+- **How to parse responses** - Using `READ_*` commands to extract data from server responses
+- **How to format output** - Using `OUTPUT_*` blocks to format results as Prometheus metrics
+
+![Code Editor](images/code.png)
+
+The pseudo-code language supports variables, control flow (IF/ELSE, FOR loops), string manipulation, JSON parsing, and more. This makes it easy to create monitoring scripts for any game server protocol - from simple status queries to complex multi-packet authentication flows.
+
 ## Example: Monitoring a Minecraft Server
+
+Here's a complete example that queries a Minecraft server for its status:
 
 ```pseudo
 PACKET_START
