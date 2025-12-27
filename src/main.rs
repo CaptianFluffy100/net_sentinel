@@ -61,17 +61,18 @@ async fn index_handler() -> impl IntoResponse {
 }
 
 
-async fn check_internet_connectivity(ip: &str) -> bool {
-    use tokio::time::{timeout, Duration};
+async fn check_internet_connectivity(ip: &str) -> (bool, u64) {
+    use tokio::time::{timeout, Duration, Instant};
+    let start = Instant::now();
     
     // Create HTTP client with short timeout
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(2))
         .build();
     
     let client = match client {
         Ok(c) => c,
-        Err(_) => return false,
+        Err(_) => return (false, start.elapsed().as_millis() as u64),
     };
     
     // Try HTTP request to the IP (try both HTTP and HTTPS)
@@ -81,20 +82,23 @@ async fn check_internet_connectivity(ip: &str) -> bool {
     ];
     
     for url in &urls {
-        if let Ok(result) = timeout(Duration::from_secs(3), client.get(url).send()).await {
+        if let Ok(result) = timeout(Duration::from_secs(2), client.get(url).send()).await {
             if result.is_ok() {
                 // Even if we get an error response (like 404), if we got a response,
                 // the IP is reachable, so internet is up
-                return true;
+                let elapsed_ms = start.elapsed().as_millis() as u64;
+                return (true, elapsed_ms);
             }
         }
     }
     
-    false
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+    (false, elapsed_ms)
 }
 
-async fn check_website_external(url: &str) -> bool {
-    use tokio::time::{timeout, Duration};
+async fn check_website_external(url: &str) -> (bool, u64) {
+    use tokio::time::{timeout, Duration, Instant};
+    let start = Instant::now();
     
     // Ensure URL has scheme
     let url = if !url.starts_with("http://") && !url.starts_with("https://") {
@@ -104,15 +108,18 @@ async fn check_website_external(url: &str) -> bool {
     };
     
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(2))
         .build();
     
     let client = match client {
         Ok(c) => c,
-        Err(_) => return false,
+        Err(_) => {
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            return (false, elapsed_ms);
+        }
     };
     
-    if let Ok(result) = timeout(Duration::from_secs(5), client.get(&url).send()).await {
+    let result = if let Ok(result) = timeout(Duration::from_secs(2), client.get(&url).send()).await {
         if let Ok(response) = result {
             // Only consider the website up if we get a successful HTTP status code (200-299)
             response.status().is_success()
@@ -121,31 +128,37 @@ async fn check_website_external(url: &str) -> bool {
         }
     } else {
         false
-    }
+    };
+    
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+    (result, elapsed_ms)
 }
 
-async fn check_website_direct(url: &str, direct_connect_url: Option<&str>) -> bool {
-    use tokio::time::{timeout, Duration};
+async fn check_website_direct(url: &str, direct_connect_url: Option<&str>) -> (bool, u64) {
+    use tokio::time::{timeout, Duration, Instant};
+    let start = Instant::now();
     
     // If direct_connect_url is provided, use it directly
     if let Some(direct_url) = direct_connect_url {
         if !direct_url.trim().is_empty() {
             let client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(2))
                 .danger_accept_invalid_certs(true)
                 .build();
             
             if let Ok(client) = client {
-                if let Ok(result) = timeout(Duration::from_secs(5), client.get(direct_url).send()).await {
+                if let Ok(result) = timeout(Duration::from_secs(2), client.get(direct_url).send()).await {
                     if let Ok(response) = result {
                         // Only consider the website up if we get a successful HTTP status code (200-299)
                         if response.status().is_success() {
-                            return true;
+                            let elapsed_ms = start.elapsed().as_millis() as u64;
+                            return (true, elapsed_ms);
                         }
                     }
                 }
             }
-            return false;
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            return (false, elapsed_ms);
         }
     }
     
@@ -158,12 +171,18 @@ async fn check_website_direct(url: &str, direct_connect_url: Option<&str>) -> bo
     
     let parsed_url = match reqwest::Url::parse(&url_str) {
         Ok(u) => u,
-        Err(_) => return false,
+        Err(_) => {
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            return (false, elapsed_ms);
+        }
     };
     
     let hostname = match parsed_url.host_str() {
         Some(h) => h,
-        None => return false,
+        None => {
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            return (false, elapsed_ms);
+        }
     };
     
     // Resolve DNS to get IP address
@@ -171,10 +190,16 @@ async fn check_website_direct(url: &str, direct_connect_url: Option<&str>) -> bo
         Ok(mut addrs) => {
             match addrs.next() {
                 Some(addr) => addr.ip(),
-                None => return false,
+                None => {
+                    let elapsed_ms = start.elapsed().as_millis() as u64;
+                    return (false, elapsed_ms);
+                }
             }
         }
-        Err(_) => return false,
+        Err(_) => {
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            return (false, elapsed_ms);
+        }
     };
     
     // Try both HTTP and HTTPS
@@ -186,24 +211,26 @@ async fn check_website_direct(url: &str, direct_connect_url: Option<&str>) -> bo
     for scheme in &schemes {
         let direct_url = format!("{}://{}:{}/", scheme, ip, port);
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(2))
             .danger_accept_invalid_certs(true) // For direct IP connections
             .build();
         
         if let Ok(client) = client {
             let request = client.get(&direct_url).header("Host", hostname);
-            if let Ok(result) = timeout(Duration::from_secs(5), request.send()).await {
+            if let Ok(result) = timeout(Duration::from_secs(2), request.send()).await {
                 if let Ok(response) = result {
                     // Only consider the website up if we get a successful HTTP status code (200-299)
                     if response.status().is_success() {
-                        return true;
+                        let elapsed_ms = start.elapsed().as_millis() as u64;
+                        return (true, elapsed_ms);
                     }
                 }
             }
         }
     }
     
-    false
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+    (false, elapsed_ms)
 }
 
 async fn metrics_handler(Extension(state): Extension<Arc<AppState>>) -> Response {
@@ -241,98 +268,181 @@ async fn metrics_handler(Extension(state): Extension<Arc<AppState>>) -> Response
         }
     };
 
-    // Check internet connectivity - check all ISPs concurrently (max 100 at a time)
-    // Return as soon as we get the first success for better performance
-    let internet_up = if !isps.is_empty() {
-        use futures::stream::{self, StreamExt};
-        
-        // Create a stream of futures with concurrency limit of 100
-        let ip_addresses: Vec<String> = isps.iter().map(|isp| isp.ip.clone()).collect();
-        let results = stream::iter(ip_addresses)
-            .map(|ip| async move { check_internet_connectivity(&ip).await })
-            .buffer_unordered(100);
-        
-        // Check results as they come in - return true on first success
-        let mut stream = results;
-        let mut internet_up_result = false;
-        while let Some(result) = stream.next().await {
-            if result {
-                // Found a reachable ISP, internet is up
-                internet_up_result = true;
-                break;
+    // Run all checks concurrently: ISPs, websites, and game servers all at the same time
+    let ((internet_up, isp_timing_results), website_results, game_server_results) = tokio::join!(
+        // Check internet connectivity - check all ISPs concurrently (max 100 at a time)
+        async {
+            if !isps.is_empty() {
+                use futures::stream::{self, StreamExt};
+                use std::collections::HashMap;
+                
+                // Create a stream of futures with concurrency limit of 100
+                let ip_addresses: Vec<String> = isps.iter().map(|isp| isp.ip.clone()).collect();
+                let results = stream::iter(ip_addresses.iter().cloned())
+                    .map(|ip| async move {
+                        let (success, timing_ms) = check_internet_connectivity(&ip).await;
+                        (ip, success, timing_ms)
+                    })
+                    .buffer_unordered(100);
+                
+                // Check results as they come in - return true on first success
+                let mut stream = results;
+                let mut internet_up_result = false;
+                let mut timing_map: HashMap<String, u64> = HashMap::new();
+                while let Some((ip, success, timing_ms)) = stream.next().await {
+                    timing_map.insert(ip.clone(), timing_ms);
+                    if success && !internet_up_result {
+                        // Found a reachable ISP, internet is up
+                        internet_up_result = true;
+                    }
+                }
+                (internet_up_result, timing_map)
+            } else {
+                (false, std::collections::HashMap::new())
+            }
+        },
+        // Check all websites concurrently (max 100 at a time)
+        async {
+            if !websites.is_empty() {
+                use std::collections::HashMap;
+                use futures::stream::{self, StreamExt};
+                
+                // Build a list of all check operations (external and direct) to perform with cloned data
+                let mut check_operations = Vec::new();
+                for website in &websites {
+                    let url = website.url.clone();
+                    let url_for_check = website.url.clone();
+                    check_operations.push(("external".to_string(), url.clone(), url_for_check.clone(), None));
+                    
+                    if website.direct_connect {
+                        let url_for_check2 = website.url.clone();
+                        let direct_url = website.direct_connect_url.clone();
+                        check_operations.push(("direct".to_string(), url.clone(), url_for_check2, direct_url));
+                    }
+                }
+                
+                // Execute all checks concurrently
+                let results_stream = stream::iter(check_operations)
+                    .map(|(check_type, url, url_for_check, direct_url)| async move {
+                        let (result, timing_ms) = match check_type.as_str() {
+                            "external" => {
+                                check_website_external(&url_for_check).await
+                            }
+                            "direct" => {
+                                check_website_direct(&url_for_check, direct_url.as_deref()).await
+                            }
+                            _ => (false, 0),
+                        };
+                        ((url, check_type), (result, timing_ms))
+                    })
+                    .buffer_unordered(100);
+                
+                let mut results = HashMap::new();
+                let mut stream = results_stream;
+                while let Some((key, result_timing)) = stream.next().await {
+                    results.insert(key, result_timing);
+                }
+                
+                results
+            } else {
+                std::collections::HashMap::new()
+            }
+        },
+        // Check game servers concurrently
+        async {
+            if !game_servers.is_empty() {
+                use std::collections::HashMap;
+                use futures::stream::{self, StreamExt};
+                
+                let servers_clone: Vec<_> = game_servers.iter().cloned().collect();
+                let results_stream = stream::iter(servers_clone)
+                    .map(|server| async move {
+                        let result = crate::gameserver_check::check_game_server(&server).await;
+                        (server.id, server.name.clone(), server.address.clone(), server.port, result)
+                    })
+                    .buffer_unordered(100);
+                
+                let mut results = HashMap::new();
+                let mut stream = results_stream;
+                while let Some((id, name, address, port, result)) = stream.next().await {
+                    results.insert(id, (name, address, port, result));
+                }
+                results
+            } else {
+                std::collections::HashMap::new()
             }
         }
-        internet_up_result
-    } else {
-        false
-    };
+    );
 
-    // Check all websites concurrently (max 100 at a time)
-    let website_results = if !websites.is_empty() {
-        use std::collections::HashMap;
-        
-        // Create check tasks for external and direct (if enabled)
-        let mut tasks = Vec::new();
-        for website in &websites {
-            let url = website.url.clone();
-            let url_external = website.url.clone();
-            let url_direct_for_check = website.url.clone();
-            let url_for_direct_key = website.url.clone();
-            
-            // External check
-            tasks.push(("external".to_string(), url.clone(), tokio::spawn(async move {
-                check_website_external(&url_external).await
-            })));
-            
-            // Direct check (only if enabled)
-            if website.direct_connect {
-                let direct_url_for_check = website.direct_connect_url.clone();
-                tasks.push(("direct".to_string(), url_for_direct_key, tokio::spawn(async move {
-                    check_website_direct(&url_direct_for_check, direct_url_for_check.as_deref()).await
-                })));
-            }
-        }
-        
-        // Wait for all tasks to complete
-        let mut results: HashMap<(String, String), bool> = HashMap::new();
-        for (check_type, url, task) in tasks {
-            if let Ok(result) = task.await {
-                results.insert((url, check_type), result);
-            }
-        }
-        
-        results
-    } else {
-        std::collections::HashMap::new()
-    };
-
-    // Check game servers concurrently
-    let game_server_results = if !game_servers.is_empty() {
-        use std::collections::HashMap;
-        use futures::stream::{self, StreamExt};
-        
-        let servers_clone: Vec<_> = game_servers.iter().cloned().collect();
-        let results_stream = stream::iter(servers_clone)
-            .map(|server| async move {
-                let result = crate::gameserver_check::check_game_server(&server).await;
-                (server.id, server.name.clone(), server.address.clone(), server.port, result)
-            })
-            .buffer_unordered(100);
-        
-        let mut results = HashMap::new();
-        let mut stream = results_stream;
-        while let Some((id, name, address, port, result)) = stream.next().await {
-            results.insert(id, (name, address, port, result));
-        }
-        results
-    } else {
-        std::collections::HashMap::new()
-    };
-
-    let response = build_metrics_response(&isps, internet_up, &websites, &website_results, &game_servers, &game_server_results);
+    let response = build_metrics_response(&isps, internet_up, &isp_timing_results, &websites, &website_results, &game_servers, &game_server_results);
+    
+    // Log timing information for fastest and slowest checks
+    log_timing_info(&isps, &isp_timing_results, &websites, &website_results, &game_servers, &game_server_results);
+    
     let elapsed = start.elapsed();
     out::info("metrics", &format!("Processed /metrics endpoint in {:.2}ms", elapsed.as_secs_f64() * 1000.0));
     response
+}
+
+fn log_timing_info(
+    isps: &[crate::models::Isp],
+    isp_timing_results: &std::collections::HashMap<String, u64>,
+    websites: &[crate::models::Website],
+    website_results: &std::collections::HashMap<(String, String), (bool, u64)>,
+    game_servers: &[crate::models::GameServer],
+    game_server_results: &std::collections::HashMap<i64, (String, String, u16, crate::models::GameServerTestResult)>,
+) {
+    use crate::out;
+    
+    // Collect all timing data with identifiers
+    let mut all_timings: Vec<(String, u64)> = Vec::new();
+    
+    // ISP timings
+    for isp in isps {
+        if let Some(&timing_ms) = isp_timing_results.get(&isp.ip) {
+            all_timings.push((format!("ISP: {} ({})", isp.name, isp.ip), timing_ms));
+        }
+    }
+    
+    // Website timings
+    for website in websites {
+        if let Some(&(_, timing_ms)) = website_results.get(&(website.url.clone(), "external".to_string())) {
+            all_timings.push((format!("Website External: {}", website.url), timing_ms));
+        }
+        if website.direct_connect {
+            if let Some(&(_, timing_ms)) = website_results.get(&(website.url.clone(), "direct".to_string())) {
+                all_timings.push((format!("Website Direct: {}", website.url), timing_ms));
+            }
+        }
+    }
+    
+    // Game server timings
+    for server in game_servers {
+        if let Some((name, address, port, result)) = game_server_results.get(&server.id) {
+            all_timings.push((format!("Game Server: {} ({}:{})", name, address, port), result.response_time_ms));
+        }
+    }
+    
+    if all_timings.is_empty() {
+        return;
+    }
+    
+    // Find fastest and slowest
+    if let Some(fastest) = all_timings.iter().min_by_key(|(_, ms)| *ms) {
+        out::info("timing", &format!("Fastest check: {} - {}ms", fastest.0, fastest.1));
+    }
+    
+    if let Some(slowest) = all_timings.iter().max_by_key(|(_, ms)| *ms) {
+        out::info("timing", &format!("Slowest check: {} - {}ms", slowest.0, slowest.1));
+    }
+    
+    // Log all timings sorted by time
+    let mut sorted_timings = all_timings;
+    sorted_timings.sort_by_key(|(_, ms)| *ms);
+    out::info("timing", "All check times (sorted):");
+    for (name, timing_ms) in sorted_timings {
+        out::info("timing", &format!("  {} - {}ms", name, timing_ms));
+    }
 }
 
 fn parse_return_output(output: &str) -> Vec<(String, String)> {
@@ -401,10 +511,11 @@ fn sanitize_metric_name(name: &str) -> String {
 }
 
 fn build_metrics_response(
-    _isps: &[crate::models::Isp],
+    isps: &[crate::models::Isp],
     internet_up: bool,
+    isp_timing_results: &std::collections::HashMap<String, u64>,
     websites: &[crate::models::Website],
-    website_results: &std::collections::HashMap<(String, String), bool>,
+    website_results: &std::collections::HashMap<(String, String), (bool, u64)>,
     game_servers: &[crate::models::GameServer],
     game_server_results: &std::collections::HashMap<i64, (String, String, u16, crate::models::GameServerTestResult)>,
 ) -> Response {
@@ -416,9 +527,24 @@ fn build_metrics_response(
     metrics.push_str("# HELP net_sentinel_internet_up Internet connectivity status (1 = up, 0 = down)\n# TYPE net_sentinel_internet_up gauge\n");
     metrics.push_str(&format!("net_sentinel_internet_up {}\n", if internet_up { 1 } else { 0 }));
 
+    // Add ISP timing metrics
+    metrics.push_str("# HELP net_sentinel_isp_response_time ISP response time in milliseconds\n# TYPE net_sentinel_isp_response_time gauge\n");
+    for isp in isps {
+        if let Some(&timing_ms) = isp_timing_results.get(&isp.ip) {
+            metrics.push_str(&format!(
+                "net_sentinel_isp_response_time{{name=\"{}\",ip=\"{}\"}} {}\n",
+                escape_prometheus_label(&isp.name),
+                escape_prometheus_label(&isp.ip),
+                timing_ms
+            ));
+        }
+    }
+
     // Add website metrics
     metrics.push_str("# HELP net_sentinel_website_external_up External website connectivity status (1 = up, 0 = down)\n# TYPE net_sentinel_website_external_up gauge\n");
+    metrics.push_str("# HELP net_sentinel_website_external_response_time External website response time in milliseconds\n# TYPE net_sentinel_website_external_response_time gauge\n");
     metrics.push_str("# HELP net_sentinel_website_direct_up Direct website connectivity status (1 = up, 0 = down)\n# TYPE net_sentinel_website_direct_up gauge\n");
+    metrics.push_str("# HELP net_sentinel_website_direct_response_time Direct website response time in milliseconds\n# TYPE net_sentinel_website_direct_response_time gauge\n");
     
     for website in websites {
         // Extract site name from URL (remove protocol, path, etc.)
@@ -434,27 +560,33 @@ fn build_metrics_response(
             .to_string();
         
         // External check result
-        let external_result = website_results
-            .get(&(website.url.clone(), "external".to_string()))
-            .copied()
-            .unwrap_or(false);
-        metrics.push_str(&format!(
-            "net_sentinel_website_external_up{{site=\"{}\"}} {}\n",
-            site,
-            if external_result { 1 } else { 0 }
-        ));
+        if let Some(&(external_result, timing_ms)) = website_results.get(&(website.url.clone(), "external".to_string())) {
+            metrics.push_str(&format!(
+                "net_sentinel_website_external_up{{site=\"{}\"}} {}\n",
+                site,
+                if external_result { 1 } else { 0 }
+            ));
+            metrics.push_str(&format!(
+                "net_sentinel_website_external_response_time{{site=\"{}\"}} {}\n",
+                site,
+                timing_ms
+            ));
+        }
         
         // Direct check result (only if direct_connect is enabled)
         if website.direct_connect {
-            let direct_result = website_results
-                .get(&(website.url.clone(), "direct".to_string()))
-                .copied()
-                .unwrap_or(false);
-            metrics.push_str(&format!(
-                "net_sentinel_website_direct_up{{site=\"{}\"}} {}\n",
-                site,
-                if direct_result { 1 } else { 0 }
-            ));
+            if let Some(&(direct_result, timing_ms)) = website_results.get(&(website.url.clone(), "direct".to_string())) {
+                metrics.push_str(&format!(
+                    "net_sentinel_website_direct_up{{site=\"{}\"}} {}\n",
+                    site,
+                    if direct_result { 1 } else { 0 }
+                ));
+                metrics.push_str(&format!(
+                    "net_sentinel_website_direct_response_time{{site=\"{}\"}} {}\n",
+                    site,
+                    timing_ms
+                ));
+            }
         }
     }
 
